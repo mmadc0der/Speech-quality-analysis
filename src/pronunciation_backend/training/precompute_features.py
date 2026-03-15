@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -40,6 +41,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-utterances", type=int)
     parser.add_argument("--min-audio-ms", type=int, default=100)
     parser.add_argument("--max-audio-ms", type=int, default=30_000)
+    parser.add_argument("--progress-every", type=int, default=100)
     parser.add_argument("--auto-plan", action="store_true", default=True)
     parser.add_argument("--no-auto-plan", action="store_false", dest="auto_plan")
     parser.add_argument("--overwrite", action="store_true")
@@ -210,6 +212,24 @@ def _write_jsonl_shards(split_dir: Path, rows: list[PhoneEmbeddingArtifact], *, 
     return written_rows
 
 
+def _print_progress(
+    *,
+    split: str,
+    processed: int,
+    total: int,
+    split_rows: int,
+    started_at: float,
+) -> None:
+    elapsed = max(1e-6, time.monotonic() - started_at)
+    rate = processed / elapsed
+    remaining = max(0, total - processed)
+    eta_seconds = int(round(remaining / rate)) if rate > 0 else 0
+    print(
+        f"split={split} progress={processed}/{total} "
+        f"rows={split_rows} utt_per_s={rate:.2f} eta_s={eta_seconds}"
+    )
+
+
 def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
@@ -258,7 +278,9 @@ def main() -> int:
             artifact_path = aligned_dir / f"{split}.jsonl"
             utterances = _read_artifacts(artifact_path, max_utterances=args.max_utterances)
             split_rows: list[PhoneEmbeddingArtifact] = []
-            for utterance in utterances:
+            split_started_at = time.monotonic()
+            total_utterances_in_split = len(utterances)
+            for index, utterance in enumerate(utterances, start=1):
                 if utterance.split != split:
                     raise ValueError(f"Utterance {utterance.utterance_id} declares split={utterance.split}, expected {split}")
                 audio_path = _resolve_audio_path(dataset_root, utterance.audio_path)
@@ -275,6 +297,14 @@ def main() -> int:
                         embedding_source=spec.embedding_source,
                     )
                 )
+                if args.progress_every > 0 and (index % args.progress_every == 0 or index == total_utterances_in_split):
+                    _print_progress(
+                        split=split,
+                        processed=index,
+                        total=total_utterances_in_split,
+                        split_rows=len(split_rows),
+                        started_at=split_started_at,
+                    )
 
             split_dir = feature_paths["split_root"] / split
             written_rows = _write_jsonl_shards(split_dir, split_rows, shard_size=args.shard_size, overwrite=args.overwrite)

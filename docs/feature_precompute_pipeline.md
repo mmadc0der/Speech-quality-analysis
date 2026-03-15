@@ -235,6 +235,7 @@ python -m pronunciation_backend.training.precompute_features \
   --artifact-schema-version phone_embedding_artifact_v1 \
   --sample-rate 16000 \
   --device cuda \
+  --progress-every 100 \
   --shard-size 2000
 ```
 
@@ -255,9 +256,17 @@ python -m pronunciation_backend.training.precompute_features \
   --artifact-schema-version phone_embedding_artifact_v1 \
   --sample-rate 16000 \
   --device cuda \
+  --progress-every 10 \
   --max-utterances 32 \
   --overwrite
 ```
+
+The command prints periodic progress with:
+
+- processed utterances in the current split
+- accumulated phone rows
+- utterances per second
+- ETA in seconds
 
 ### Step 8. Inspect completion state
 

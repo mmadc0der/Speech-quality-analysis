@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -14,18 +15,22 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-root", required=True, help="Root directory containing LibriTTS subset folders or files.")
     parser.add_argument("--output-dir", help="Output directory for prepared manifests. Defaults to <dataset-root>/prepared.")
     parser.add_argument("--audio-extensions", nargs="+", default=[".wav", ".flac"])
+    parser.add_argument("--progress-every", type=int, default=5_000)
     parser.add_argument("--overwrite", action="store_true")
     return parser
 
 
 def _split_from_subset(path: Path) -> str:
-    subset = path.parts[0].lower() if path.parts else ""
-    if subset.startswith("train"):
-        return "train"
-    if subset.startswith("dev"):
-        return "val"
-    if subset.startswith("test"):
-        return "test"
+    lowered_parts = [part.lower() for part in path.parts]
+    for part in lowered_parts:
+        if part.startswith("test"):
+            return "test"
+    for part in lowered_parts:
+        if part.startswith("dev"):
+            return "val"
+    for part in lowered_parts:
+        if part.startswith("train"):
+            return "train"
     return "train"
 
 
@@ -65,7 +70,12 @@ def _candidate_audio_files(dataset_root: Path, audio_extensions: set[str]) -> li
     return sorted(audio_files)
 
 
-def _scan_dataset(dataset_root: Path, audio_extensions: set[str]) -> tuple[dict[str, list[PreparedUtteranceArtifact]], dict[str, int]]:
+def _scan_dataset(
+    dataset_root: Path,
+    audio_extensions: set[str],
+    *,
+    progress_every: int,
+) -> tuple[dict[str, list[PreparedUtteranceArtifact]], dict[str, int]]:
     artifacts: dict[str, list[PreparedUtteranceArtifact]] = {"train": [], "val": [], "test": []}
     stats = {
         "audio_candidates": 0,
@@ -73,34 +83,47 @@ def _scan_dataset(dataset_root: Path, audio_extensions: set[str]) -> tuple[dict[
         "empty_transcript": 0,
         "prepared_rows": 0,
     }
+    started_at = time.monotonic()
 
-    for audio_path in _candidate_audio_files(dataset_root, audio_extensions):
+    audio_files = _candidate_audio_files(dataset_root, audio_extensions)
+    total_candidates = len(audio_files)
+    for index, audio_path in enumerate(audio_files, start=1):
         stats["audio_candidates"] += 1
         transcript_path = _find_transcript(audio_path)
         if transcript_path is None:
             stats["missing_transcript"] += 1
-            continue
+        else:
+            relative_audio = audio_path.relative_to(dataset_root)
+            split = _split_from_subset(relative_audio)
+            text = _normalize_text(transcript_path.read_text(encoding="utf-8"))
+            if not text:
+                stats["empty_transcript"] += 1
+            else:
+                artifacts[split].append(
+                    PreparedUtteranceArtifact(
+                        utterance_id=audio_path.stem,
+                        speaker_id=audio_path.parent.parent.name if len(audio_path.parts) >= 3 else "unknown",
+                        dataset="libritts",
+                        split=split,
+                        text=text,
+                        normalized_text=text.lower(),
+                        audio_path=_relative_str(audio_path, dataset_root),
+                        transcript_path=_relative_str(transcript_path, dataset_root),
+                    )
+                )
+                stats["prepared_rows"] += 1
 
-        relative_audio = audio_path.relative_to(dataset_root)
-        split = _split_from_subset(relative_audio)
-        text = _normalize_text(transcript_path.read_text(encoding="utf-8"))
-        if not text:
-            stats["empty_transcript"] += 1
-            continue
-
-        artifacts[split].append(
-            PreparedUtteranceArtifact(
-                utterance_id=audio_path.stem,
-                speaker_id=audio_path.parent.parent.name if len(audio_path.parts) >= 3 else "unknown",
-                dataset="libritts",
-                split=split,
-                text=text,
-                normalized_text=text.lower(),
-                audio_path=_relative_str(audio_path, dataset_root),
-                transcript_path=_relative_str(transcript_path, dataset_root),
+        if progress_every > 0 and (index % progress_every == 0 or index == total_candidates):
+            elapsed = max(1e-6, time.monotonic() - started_at)
+            rate = index / elapsed
+            remaining = max(0, total_candidates - index)
+            eta_seconds = int(round(remaining / rate)) if rate > 0 else 0
+            print(
+                f"scan progress: processed={index}/{total_candidates} "
+                f"prepared_rows={stats['prepared_rows']} "
+                f"missing_transcript={stats['missing_transcript']} "
+                f"eta_s={eta_seconds}"
             )
-        )
-        stats["prepared_rows"] += 1
 
     return artifacts, stats
 
@@ -125,7 +148,7 @@ def main() -> int:
 
     output_dir = Path(args.output_dir) if args.output_dir else dataset_root / "prepared"
     audio_extensions = {extension.lower() if extension.startswith(".") else f".{extension.lower()}" for extension in args.audio_extensions}
-    artifacts, stats = _scan_dataset(dataset_root, audio_extensions)
+    artifacts, stats = _scan_dataset(dataset_root, audio_extensions, progress_every=args.progress_every)
 
     for split, rows in artifacts.items():
         target = output_dir / f"{split}.jsonl"

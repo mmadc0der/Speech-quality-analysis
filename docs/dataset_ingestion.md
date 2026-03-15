@@ -117,6 +117,7 @@ Example:
 ```bash
 python -m pronunciation_backend.training.prepare_libritts \
   --dataset-root /cold/pronunciation/datasets/libritts/raw \
+  --progress-every 5000 \
   --overwrite
 ```
 
@@ -125,8 +126,16 @@ If you keep `LibriTTS` directly under `/cold/pronunciation/datasets/libritts`, y
 ```bash
 python -m pronunciation_backend.training.prepare_libritts \
   --dataset-root /cold/pronunciation/datasets/libritts \
+  --progress-every 5000 \
   --overwrite
 ```
+
+The command prints periodic scan progress with:
+
+- processed file count
+- prepared row count
+- missing transcript count
+- ETA in seconds
 
 ## Recommended Persistent Setup
 
