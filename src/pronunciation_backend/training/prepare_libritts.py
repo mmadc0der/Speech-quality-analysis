@@ -13,7 +13,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Prepare persistent LibriTTS utterance manifests from a preloaded dataset root.")
     parser.add_argument("--dataset-root", required=True, help="Root directory containing LibriTTS subset folders or files.")
     parser.add_argument("--output-dir", help="Output directory for prepared manifests. Defaults to <dataset-root>/prepared.")
-    parser.add_argument("--audio-extension", default=".wav")
+    parser.add_argument("--audio-extensions", nargs="+", default=[".wav", ".flac"])
     parser.add_argument("--overwrite", action="store_true")
     return parser
 
@@ -33,6 +33,9 @@ def _find_transcript(audio_path: Path) -> Path | None:
     normalized = audio_path.with_suffix(".normalized.txt")
     if normalized.exists():
         return normalized
+    original = audio_path.with_suffix(".original.txt")
+    if original.exists():
+        return original
     plain = audio_path.with_suffix(".txt")
     if plain.exists():
         return plain
@@ -50,22 +53,39 @@ def _relative_str(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
-def _scan_dataset(dataset_root: Path, audio_extension: str) -> dict[str, list[PreparedUtteranceArtifact]]:
-    artifacts: dict[str, list[PreparedUtteranceArtifact]] = {"train": [], "val": [], "test": []}
-    pattern = f"*{audio_extension}"
-
-    for audio_path in sorted(dataset_root.rglob(pattern)):
-        if "prepared" in audio_path.parts or "aligned" in audio_path.parts:
+def _candidate_audio_files(dataset_root: Path, audio_extensions: set[str]) -> list[Path]:
+    audio_files: list[Path] = []
+    for candidate in dataset_root.rglob("*"):
+        if not candidate.is_file():
             continue
+        if "prepared" in candidate.parts or "aligned" in candidate.parts:
+            continue
+        if candidate.suffix.lower() in audio_extensions:
+            audio_files.append(candidate)
+    return sorted(audio_files)
 
+
+def _scan_dataset(dataset_root: Path, audio_extensions: set[str]) -> tuple[dict[str, list[PreparedUtteranceArtifact]], dict[str, int]]:
+    artifacts: dict[str, list[PreparedUtteranceArtifact]] = {"train": [], "val": [], "test": []}
+    stats = {
+        "audio_candidates": 0,
+        "missing_transcript": 0,
+        "empty_transcript": 0,
+        "prepared_rows": 0,
+    }
+
+    for audio_path in _candidate_audio_files(dataset_root, audio_extensions):
+        stats["audio_candidates"] += 1
         transcript_path = _find_transcript(audio_path)
         if transcript_path is None:
+            stats["missing_transcript"] += 1
             continue
 
         relative_audio = audio_path.relative_to(dataset_root)
         split = _split_from_subset(relative_audio)
         text = _normalize_text(transcript_path.read_text(encoding="utf-8"))
         if not text:
+            stats["empty_transcript"] += 1
             continue
 
         artifacts[split].append(
@@ -80,8 +100,9 @@ def _scan_dataset(dataset_root: Path, audio_extension: str) -> dict[str, list[Pr
                 transcript_path=_relative_str(transcript_path, dataset_root),
             )
         )
+        stats["prepared_rows"] += 1
 
-    return artifacts
+    return artifacts, stats
 
 
 def _write_jsonl(path: Path, items: list[PreparedUtteranceArtifact], *, overwrite: bool) -> None:
@@ -103,7 +124,8 @@ def main() -> int:
         return 1
 
     output_dir = Path(args.output_dir) if args.output_dir else dataset_root / "prepared"
-    artifacts = _scan_dataset(dataset_root, args.audio_extension)
+    audio_extensions = {extension.lower() if extension.startswith(".") else f".{extension.lower()}" for extension in args.audio_extensions}
+    artifacts, stats = _scan_dataset(dataset_root, audio_extensions)
 
     for split, rows in artifacts.items():
         target = output_dir / f"{split}.jsonl"
@@ -114,6 +136,8 @@ def main() -> int:
         "dataset": "libritts",
         "dataset_root": str(dataset_root),
         "output_dir": str(output_dir),
+        "audio_extensions": sorted(audio_extensions),
+        "scan_stats": stats,
         "counts": {split: len(rows) for split, rows in artifacts.items()},
         "speakers": {
             split: len(Counter(row.speaker_id for row in rows))
@@ -122,6 +146,13 @@ def main() -> int:
     }
     summary_path = output_dir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(
+        "scan stats: "
+        f"audio_candidates={stats['audio_candidates']} "
+        f"missing_transcript={stats['missing_transcript']} "
+        f"empty_transcript={stats['empty_transcript']} "
+        f"prepared_rows={stats['prepared_rows']}"
+    )
     print(f"wrote summary={summary_path}")
     return 0
 
