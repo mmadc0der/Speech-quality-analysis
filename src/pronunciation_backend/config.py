@@ -15,6 +15,12 @@ class Settings:
     use_hf_encoder: bool = os.getenv("PRONUNCIATION_USE_HF_ENCODER", "0") == "1"
     backbone_id: str = os.getenv("PRONUNCIATION_BACKBONE_ID", "facebook/hubert-base-ls960")
     device: str = os.getenv("PRONUNCIATION_DEVICE", "cpu")
+    storage_root: Path = Path(os.getenv("PRONUNCIATION_STORAGE_ROOT", "/cold/pronunciation"))
+    hf_home: Path = Path(os.getenv("HF_HOME", "/cold/huggingface"))
+    dataset_root: Path = Path(os.getenv("PRONUNCIATION_DATASET_ROOT", str(storage_root / "datasets")))
+    feature_root: Path = Path(os.getenv("PRONUNCIATION_FEATURE_ROOT", str(storage_root / "features")))
+    checkpoint_root: Path = Path(os.getenv("PRONUNCIATION_CHECKPOINT_ROOT", str(storage_root / "checkpoints")))
+    report_root: Path = Path(os.getenv("PRONUNCIATION_REPORT_ROOT", str(storage_root / "reports")))
     lexicon_path: Path = Path(__file__).resolve().parent / "resources" / "en_us_words.json"
     reference_manifest_path: Path = Path(__file__).resolve().parent / "resources" / "reference_audio_manifest.json"
 

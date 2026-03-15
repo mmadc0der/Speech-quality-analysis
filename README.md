@@ -45,6 +45,8 @@ The recommended first dataset mix is:
 - `speechocean762` for supervised phoneme-quality labels
 - native `en-US` read speech such as `LibriTTS` for duration priors and native-reference calibration
 
+For the first training-launch milestone, see `docs/feature_precompute_pipeline.md`. It defines the `/cold` storage layout, hashed feature-cache policy, and the initial dataset verification flow for feature precompute.
+
 ## Run
 
 ```bash
