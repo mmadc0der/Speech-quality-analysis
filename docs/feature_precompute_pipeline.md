@@ -213,6 +213,8 @@ Each line must validate as `TrainingUtteranceArtifact`, and each row must contai
 
 `audio_path` may be absolute or relative to the dataset root.
 
+These aligned files are expected to be produced from dataset-specific `prepared/*.jsonl` manifests first. See `docs/dataset_ingestion.md`.
+
 ### Step 7. Run actual feature precompute
 
 Example for `libritts`:

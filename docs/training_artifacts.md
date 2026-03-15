@@ -13,11 +13,12 @@ This keeps training cheap on a single consumer GPU and avoids coupling scorer ex
 
 ## Artifact Flow
 
-1. Curated word inventory resolves `word -> canonical phones -> IPA -> reference audio`.
-2. Native `en-US` and labeled learner recordings are aligned to phoneme spans.
-3. A frozen speech backbone extracts frame embeddings offline.
-4. Frame embeddings are pooled into per-phone rows and written as cached training artifacts.
-5. A standalone scorer trains from cached phone rows without re-running the backbone each epoch.
+1. Raw corpora are normalized into dataset-specific `prepared` manifests.
+2. Curated word inventory resolves `word -> canonical phones -> IPA -> reference audio`.
+3. Native `en-US` and labeled learner recordings are aligned to phoneme spans.
+4. A frozen speech backbone extracts frame embeddings offline.
+5. Frame embeddings are pooled into per-phone rows and written as cached training artifacts.
+6. A standalone scorer trains from cached phone rows without re-running the backbone each epoch.
 
 ## Primary Schemas
 

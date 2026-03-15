@@ -47,6 +47,8 @@ The recommended first dataset mix is:
 
 For the first training-launch milestone, see `docs/feature_precompute_pipeline.md`. It defines the `/cold` storage layout, hashed feature-cache policy, aligned-artifact expectations, and the actual feature precompute command.
 
+For dataset handling, see `docs/dataset_ingestion.md`. The project now follows a preload-first `raw -> prepared -> aligned -> features` pipeline, starting with a persistent `LibriTTS` prepared-manifest builder.
+
 ## Run
 
 ```bash

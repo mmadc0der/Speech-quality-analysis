@@ -5,6 +5,17 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class PreparedUtteranceArtifact(BaseModel):
+    utterance_id: str
+    speaker_id: str
+    dataset: str
+    split: Literal["train", "val", "test"]
+    text: str
+    normalized_text: str
+    audio_path: str
+    transcript_path: str | None = None
+
+
 class TrainingPhoneLabel(BaseModel):
     phoneme: str
     index: int = Field(ge=0)
