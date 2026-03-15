@@ -86,7 +86,11 @@ Supported commands:
 - `plan`: create the hashed feature-store directory and manifests
 - `verify`: check dataset presence and feature-store manifests
 
-This utility does not yet extract embeddings. It is the control-plane layer for the future precompute runner.
+This utility is the control-plane layer for the precompute runner.
+
+The actual feature extractor now lives at:
+
+`python -m pronunciation_backend.training.precompute_features`
 
 ## Precompute Spec Example
 
@@ -187,22 +191,108 @@ python -m pronunciation_backend.training.feature_store plan \
   --sample-rate 16000
 ```
 
-## What The Actual Extractor Must Do Next
+### Step 6. Make sure aligned artifacts exist
 
-The next implementation step should add a real precompute runner that:
-
-1. loads aligned utterance artifacts for one dataset split
-2. runs the frozen backbone offline
-3. pools frame embeddings into `PhoneEmbeddingArtifact` rows
-4. writes sharded parquet files into the hashed split directory
-5. updates `state.json` with row counts and completion status
-
-Recommended output pattern:
+The extractor expects aligned utterance artifacts under:
 
 ```text
-/cold/pronunciation/features/speechocean762/<feature_key>/splits/train/part-0000.parquet
-/cold/pronunciation/features/speechocean762/<feature_key>/splits/val/part-0000.parquet
-/cold/pronunciation/features/speechocean762/<feature_key>/splits/test/part-0000.parquet
+<dataset-root>/aligned/train.jsonl
+<dataset-root>/aligned/val.jsonl
+<dataset-root>/aligned/test.jsonl
+```
+
+Each line must validate as `TrainingUtteranceArtifact`, and each row must contain:
+
+- `audio_path`
+- `canonical_phones`
+- `phone_labels`
+- `split`
+
+`audio_path` may be absolute or relative to the dataset root.
+
+### Step 7. Run actual feature precompute
+
+Example for `libritts`:
+
+```bash
+export PRONUNCIATION_USE_HF_ENCODER=1
+export PRONUNCIATION_DEVICE=cuda
+
+python -m pronunciation_backend.training.precompute_features \
+  --dataset libritts \
+  --dataset-root /cold/pronunciation/datasets/libritts \
+  --splits train val test \
+  --backbone-id facebook/hubert-base-ls960 \
+  --backbone-revision main \
+  --embedding-source hubert \
+  --alignment-source mfa \
+  --pooling-version phone_mean_v1 \
+  --artifact-schema-version phone_embedding_artifact_v1 \
+  --sample-rate 16000 \
+  --device cuda \
+  --shard-size 2000
+```
+
+For a smaller smoke test:
+
+```bash
+python -m pronunciation_backend.training.precompute_features \
+  --dataset libritts \
+  --dataset-root /cold/pronunciation/datasets/libritts \
+  --splits train \
+  --backbone-id facebook/hubert-base-ls960 \
+  --backbone-revision main \
+  --embedding-source hubert \
+  --alignment-source mfa \
+  --pooling-version phone_mean_v1 \
+  --artifact-schema-version phone_embedding_artifact_v1 \
+  --sample-rate 16000 \
+  --device cuda \
+  --max-utterances 32 \
+  --overwrite
+```
+
+### Step 8. Inspect completion state
+
+After a successful run:
+
+- `state.json` should have `status: complete`
+- `split_counts` should contain row counts
+- `utterance_counts` should contain processed utterance counts
+- `splits/<split>/part-*.jsonl` should exist
+
+## What The Extractor Does
+
+The current runner:
+
+1. verifies the hashed feature-store exists
+2. reads aligned `TrainingUtteranceArtifact` JSONL files
+3. loads each waveform from `audio_path`
+4. runs the frozen encoder
+5. pools phone spans into `PhoneEmbeddingArtifact` rows
+6. writes sharded JSONL files into the hashed split directory
+7. updates `state.json`
+
+## What The Actual Extractor Still Does Not Do
+
+The current version intentionally keeps the first runnable pipeline simple.
+
+It does not yet:
+
+- batch multiple utterances in one forward pass
+- write parquet shards
+- estimate dataset-specific duration priors
+- skip already processed individual utterances inside a split
+- distribute work across multiple processes
+
+Those can be added after the first full cache is generated successfully.
+
+Recommended current output pattern:
+
+```text
+/cold/pronunciation/features/speechocean762/<feature_key>/splits/train/part-0000.jsonl
+/cold/pronunciation/features/speechocean762/<feature_key>/splits/val/part-0000.jsonl
+/cold/pronunciation/features/speechocean762/<feature_key>/splits/test/part-0000.jsonl
 ```
 
 ## Definition Of Done For This Stage
@@ -212,6 +302,5 @@ This feature-precompute stage is complete when:
 - dataset roots are validated
 - hashed feature-store directories are created
 - manifests are written
-- later extractor runs can detect whether a compatible cache already exists
-
-The stage is not yet complete when only raw datasets are downloaded. The cache namespace and manifests must exist first.
+- sharded feature files are written under split directories
+- `state.json` records per-split row counts

@@ -30,6 +30,8 @@ class FeatureStoreState(BaseModel):
     feature_key: str
     status: Literal["planned", "running", "complete"] = "planned"
     split_counts: dict[str, int] = Field(default_factory=dict)
+    utterance_counts: dict[str, int] = Field(default_factory=dict)
+    output_format: Literal["jsonl"] | None = None
 
 
 @dataclass(frozen=True)
