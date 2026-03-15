@@ -20,6 +20,7 @@ class TrainingUtteranceArtifact(BaseModel):
     utterance_id: str
     speaker_id: str
     dataset: str
+    split: Literal["train", "val", "test"]
     accent_target: Literal["en-US"] = "en-US"
     target_word: str
     canonical_phones: list[str]
@@ -34,8 +35,18 @@ class TrainingUtteranceArtifact(BaseModel):
 
 class PhoneEmbeddingArtifact(BaseModel):
     utterance_id: str
+    speaker_id: str
+    dataset: str
+    split: Literal["train", "val", "test"]
+    target_word: str
+    accent_target: Literal["en-US"] = "en-US"
     phoneme: str
     index: int = Field(ge=0)
+    prev_phoneme: str | None = None
+    next_phoneme: str | None = None
+    frame_count: int = Field(ge=1)
+    backbone_id: str
+    embedding_source: Literal["hubert", "wav2vec2", "fallback"]
     mean_embedding: list[float]
     variance: float = Field(ge=0)
     duration_ms: int = Field(ge=0)
@@ -43,6 +54,7 @@ class PhoneEmbeddingArtifact(BaseModel):
     alignment_confidence: float = Field(ge=0, le=1)
     energy_mean: float = Field(ge=0)
     pronunciation_class: Literal["correct", "accented", "wrong_or_missed"]
+    human_score: float = Field(ge=0, le=2)
     regression_target: float = Field(ge=0, le=100)
     omission_target: int = Field(ge=0, le=1)
 

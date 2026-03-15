@@ -16,7 +16,7 @@ def _clamp_score(value: float) -> int:
 
 @dataclass
 class PhoneScoringHead:
-    """MVP scorer with hooks for later replacement by a trained head."""
+    """Runtime MVP scorer until a standalone trained scorer checkpoint replaces it."""
 
     def score(self, phone_features: list[PhoneFeatures]) -> list[PhonemeAssessmentPayload]:
         assessments: list[PhonemeAssessmentPayload] = []

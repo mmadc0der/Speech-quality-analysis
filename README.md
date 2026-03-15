@@ -29,6 +29,22 @@ This repository ships a runnable MVP implementation with:
 - resource manifests for a starter `en-US` vocabulary
 - training artifact schemas for aligned phoneme supervision
 
+## Training Direction
+
+The current training direction is intentionally split from runtime inference:
+
+1. align labeled utterances to canonical phone spans
+2. run a frozen `HuBERT` or `Wav2Vec2` encoder offline
+3. cache per-phone feature rows to disk
+4. train a standalone phoneme scorer from cached artifacts
+
+That means v1 training does not keep the frozen backbone and the scorer inside one end-to-end trainable module. The backbone acts as an embedding extractor, while the scorer is a separate model trained cheaply on cached phone-level tensors.
+
+The recommended first dataset mix is:
+
+- `speechocean762` for supervised phoneme-quality labels
+- native `en-US` read speech such as `LibriTTS` for duration priors and native-reference calibration
+
 ## Run
 
 ```bash

@@ -1,13 +1,23 @@
 # Training Artifacts
 
-This backend separates runtime inference from training artifacts so the phoneme-scoring head can evolve without changing the API contract.
+This backend separates runtime inference from training artifacts so the phoneme scorer can evolve without changing the API contract.
+
+For v1 training, treat the speech backbone as an offline feature extractor:
+
+- align utterances first
+- run a frozen `HuBERT` or `Wav2Vec2` encoder offline
+- materialize per-phone feature rows to disk
+- train the scorer as an independent model over cached artifacts
+
+This keeps training cheap on a single consumer GPU and avoids coupling scorer experiments to live waveform encoding.
 
 ## Artifact Flow
 
 1. Curated word inventory resolves `word -> canonical phones -> IPA -> reference audio`.
 2. Native `en-US` and labeled learner recordings are aligned to phoneme spans.
-3. Frame-level embeddings are extracted from the frozen speech backbone.
-4. Per-phone pooled features become training rows for the small scoring head.
+3. A frozen speech backbone extracts frame embeddings offline.
+4. Frame embeddings are pooled into per-phone rows and written as cached training artifacts.
+5. A standalone scorer trains from cached phone rows without re-running the backbone each epoch.
 
 ## Primary Schemas
 
@@ -20,6 +30,7 @@ Stores one aligned recording and its supervision payload:
 - `utterance_id`
 - `speaker_id`
 - `dataset`
+- `split`
 - `target_word`
 - `canonical_phones`
 - `ipa`
@@ -45,21 +56,47 @@ Stores one phoneme segment and its human or derived label:
 
 ### `PhoneEmbeddingArtifact`
 
-Stores one model-ready feature row for scorer training:
+Stores one cached model-ready row for standalone scorer training:
 
+- `speaker_id`
+- `dataset`
+- `split`
+- `target_word`
+- `accent_target`
+- `prev_phoneme` / `next_phoneme`
+- `frame_count`
+- `backbone_id`
+- `embedding_source`
 - pooled phone embedding
 - segment variance
 - duration and duration z-score
 - alignment confidence
 - mean segment energy
+- raw `human_score`
 - class target
 - regression target
 - omission target
 
+The important design choice is that this artifact is no longer just an internal tensor snapshot. It is the canonical interface between:
+
+- offline feature extraction
+- scorer training
+- scorer evaluation
+- calibration
+
+That means the scorer can be implemented as a completely separate PyTorch module that consumes cached rows from parquet, Arrow, or sharded `.pt` files.
+
 ## Suggested Datasets
 
-- native `en-US` read speech for duration priors and canonical embedding calibration
+- native `en-US` read speech such as `LibriTTS` clean subsets for duration priors, canonical embedding calibration, and native false-positive checks
 - learner speech with phoneme-level labels, such as `speechocean762`, for scorer supervision
+
+Recommended v1 mix:
+
+- `speechocean762` as the primary supervised scorer dataset
+- `LibriTTS` as the primary native reference dataset
+
+Use Hugging Face streaming only for initial ingestion if convenient. For repeated model training, materialize local aligned artifacts and cached phone embeddings first.
 
 ## Score Mapping
 
@@ -76,6 +113,29 @@ A simple regression target can be derived as:
 - `2.0 -> 92`
 
 This preserves headroom for calibration on held-out `en-US` reference speech.
+
+## Training Split Policy
+
+All scorer experiments should use speaker-disjoint splits.
+
+- `train`: scorer fitting
+- `val`: threshold selection, early stopping, and calibration fitting
+- `test`: final held-out reporting
+
+Native reference data should also keep a small held-out split so you can measure how often the scorer falsely flags good `en-US` phones.
+
+## Scorer Ownership
+
+The v1 scorer is an independent model, not a jointly trained wrapper around the frozen encoder.
+
+Recommended responsibilities:
+
+- frozen backbone: feature extraction only
+- standalone scorer: phone class, `match_score`, and `presence_score`
+- duration priors: derive `duration_score`
+- calibration layer: map raw outputs into stable runtime scores
+
+This project can still revisit LoRA later, but LoRA is intentionally out of scope for the first cached-feature training baseline.
 
 ## Runtime Compatibility
 

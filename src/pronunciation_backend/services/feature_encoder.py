@@ -18,6 +18,8 @@ except ImportError:  # pragma: no cover - optional runtime
 
 @dataclass
 class SSLFeatureEncoder:
+    """Frozen speech feature extractor for runtime and offline artifact generation."""
+
     settings: Settings
     _processor: object | None = field(default=None, init=False, repr=False)
     _model: object | None = field(default=None, init=False, repr=False)
