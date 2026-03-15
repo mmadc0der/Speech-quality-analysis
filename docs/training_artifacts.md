@@ -14,7 +14,7 @@ This keeps training cheap on a single consumer GPU and avoids coupling scorer ex
 ## Artifact Flow
 
 1. Raw corpora are normalized into dataset-specific `prepared` manifests.
-2. Curated word inventory resolves `word -> canonical phones -> IPA -> reference audio`.
+2. Dataset-specific lexicon resources resolve `word -> canonical phones -> IPA`.
 3. Native `en-US` and labeled learner recordings are aligned to phoneme spans.
 4. A frozen speech backbone extracts frame embeddings offline.
 5. Frame embeddings are pooled into per-phone rows and written as cached training artifacts.

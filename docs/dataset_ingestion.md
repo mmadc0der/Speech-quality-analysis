@@ -92,11 +92,11 @@ Frozen backbone outputs pooled into `PhoneEmbeddingArtifact` rows and written in
 - hashed feature-store planning and verification
 - actual feature precompute runner
 - persistent `LibriTTS` prepared-manifest builder
+- `LibriTTS` aligned-artifact builder from MFA `TextGrid` outputs plus `CMUdict`
 
 ### Not implemented yet
 
 - `speechocean762` prepared-manifest builder
-- aligned-artifact generation from prepared manifests
 - MFA orchestration inside the repo
 
 ## `LibriTTS` Prepare Command
@@ -135,6 +135,45 @@ The command prints periodic scan progress with:
 - processed file count
 - prepared row count
 - missing transcript count
+- ETA in seconds
+
+## `LibriTTS` Aligned Command
+
+The repository now also includes:
+
+`python -m pronunciation_backend.training.build_libritts_aligned`
+
+This command expects:
+
+- `prepared/train.jsonl`, `val.jsonl`, `test.jsonl`
+- MFA-generated `TextGrid` files mirrored to the dataset audio paths
+- a `CMUdict` file for canonical phone lookup
+
+It emits word-level `TrainingUtteranceArtifact` rows under:
+
+- `aligned/train.jsonl`
+- `aligned/val.jsonl`
+- `aligned/test.jsonl`
+- `aligned/summary.json`
+
+Example:
+
+```bash
+python -m pronunciation_backend.training.build_libritts_aligned \
+  --dataset-root /cold/pronunciation/datasets/libritts \
+  --prepared-dir /cold/pronunciation/datasets/libritts/prepared \
+  --output-dir /cold/pronunciation/datasets/libritts/aligned \
+  --textgrid-root /cold/pronunciation/datasets/libritts/mfa \
+  --cmudict-path /cold/pronunciation/resources/cmudict/cmudict-0.7b \
+  --progress-every 250 \
+  --overwrite
+```
+
+The command prints periodic progress with:
+
+- processed prepared utterances
+- emitted aligned word rows
+- utterances per second
 - ETA in seconds
 
 ## Recommended Persistent Setup
