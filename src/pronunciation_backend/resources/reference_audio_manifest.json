@@ -1,0 +1,62 @@
+{
+  "thought_en_us_01": {
+    "audio_id": "thought_en_us_01",
+    "word": "thought",
+    "accent_target": "en-US",
+    "asset_path": "assets/reference_audio/thought_en_us_01.wav"
+  },
+  "cat_en_us_01": {
+    "audio_id": "cat_en_us_01",
+    "word": "cat",
+    "accent_target": "en-US",
+    "asset_path": "assets/reference_audio/cat_en_us_01.wav"
+  },
+  "ship_en_us_01": {
+    "audio_id": "ship_en_us_01",
+    "word": "ship",
+    "accent_target": "en-US",
+    "asset_path": "assets/reference_audio/ship_en_us_01.wav"
+  },
+  "bird_en_us_01": {
+    "audio_id": "bird_en_us_01",
+    "word": "bird",
+    "accent_target": "en-US",
+    "asset_path": "assets/reference_audio/bird_en_us_01.wav"
+  },
+  "water_en_us_01": {
+    "audio_id": "water_en_us_01",
+    "word": "water",
+    "accent_target": "en-US",
+    "asset_path": "assets/reference_audio/water_en_us_01.wav"
+  },
+  "teacher_en_us_01": {
+    "audio_id": "teacher_en_us_01",
+    "word": "teacher",
+    "accent_target": "en-US",
+    "asset_path": "assets/reference_audio/teacher_en_us_01.wav"
+  },
+  "banana_en_us_01": {
+    "audio_id": "banana_en_us_01",
+    "word": "banana",
+    "accent_target": "en-US",
+    "asset_path": "assets/reference_audio/banana_en_us_01.wav"
+  },
+  "three_en_us_01": {
+    "audio_id": "three_en_us_01",
+    "word": "three",
+    "accent_target": "en-US",
+    "asset_path": "assets/reference_audio/three_en_us_01.wav"
+  },
+  "world_en_us_01": {
+    "audio_id": "world_en_us_01",
+    "word": "world",
+    "accent_target": "en-US",
+    "asset_path": "assets/reference_audio/world_en_us_01.wav"
+  },
+  "beautiful_en_us_01": {
+    "audio_id": "beautiful_en_us_01",
+    "word": "beautiful",
+    "accent_target": "en-US",
+    "asset_path": "assets/reference_audio/beautiful_en_us_01.wav"
+  }
+}

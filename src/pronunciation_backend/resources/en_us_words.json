@@ -1,0 +1,82 @@
+{
+  "thought": {
+    "word": "thought",
+    "phones": ["TH", "AO", "T"],
+    "ipa": "θɔt",
+    "reference_audio_id": "thought_en_us_01",
+    "syllables": [["TH", "AO", "T"]],
+    "stress_pattern": "1"
+  },
+  "cat": {
+    "word": "cat",
+    "phones": ["K", "AE", "T"],
+    "ipa": "kæt",
+    "reference_audio_id": "cat_en_us_01",
+    "syllables": [["K", "AE", "T"]],
+    "stress_pattern": "1"
+  },
+  "ship": {
+    "word": "ship",
+    "phones": ["SH", "IH", "P"],
+    "ipa": "ʃɪp",
+    "reference_audio_id": "ship_en_us_01",
+    "syllables": [["SH", "IH", "P"]],
+    "stress_pattern": "1"
+  },
+  "bird": {
+    "word": "bird",
+    "phones": ["B", "ER", "D"],
+    "ipa": "bɝd",
+    "reference_audio_id": "bird_en_us_01",
+    "syllables": [["B", "ER", "D"]],
+    "stress_pattern": "1"
+  },
+  "water": {
+    "word": "water",
+    "phones": ["W", "AO", "T", "ER"],
+    "ipa": "wɔtɚ",
+    "reference_audio_id": "water_en_us_01",
+    "syllables": [["W", "AO"], ["T", "ER"]],
+    "stress_pattern": "10"
+  },
+  "teacher": {
+    "word": "teacher",
+    "phones": ["T", "IY", "CH", "ER"],
+    "ipa": "titʃɚ",
+    "reference_audio_id": "teacher_en_us_01",
+    "syllables": [["T", "IY"], ["CH", "ER"]],
+    "stress_pattern": "10"
+  },
+  "banana": {
+    "word": "banana",
+    "phones": ["B", "AH", "N", "AE", "N", "AH"],
+    "ipa": "bənænə",
+    "reference_audio_id": "banana_en_us_01",
+    "syllables": [["B", "AH"], ["N", "AE"], ["N", "AH"]],
+    "stress_pattern": "010"
+  },
+  "three": {
+    "word": "three",
+    "phones": ["TH", "R", "IY"],
+    "ipa": "θɹi",
+    "reference_audio_id": "three_en_us_01",
+    "syllables": [["TH", "R", "IY"]],
+    "stress_pattern": "1"
+  },
+  "world": {
+    "word": "world",
+    "phones": ["W", "ER", "L", "D"],
+    "ipa": "wɝld",
+    "reference_audio_id": "world_en_us_01",
+    "syllables": [["W", "ER", "L", "D"]],
+    "stress_pattern": "1"
+  },
+  "beautiful": {
+    "word": "beautiful",
+    "phones": ["B", "Y", "UW", "T", "AH", "F", "AH", "L"],
+    "ipa": "bjutəfəl",
+    "reference_audio_id": "beautiful_en_us_01",
+    "syllables": [["B", "Y", "UW"], ["T", "AH"], ["F", "AH", "L"]],
+    "stress_pattern": "100"
+  }
+}
