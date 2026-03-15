@@ -44,8 +44,21 @@ class FeatureStoreLayout:
     def feature_dir(self, dataset: str, feature_key: str) -> Path:
         return self.settings.feature_root / dataset / feature_key
 
+    def key_payload(self, spec: FeaturePrecomputeSpec) -> dict:
+        return {
+            "dataset": spec.dataset,
+            "backbone_id": spec.backbone_id,
+            "backbone_revision": spec.backbone_revision,
+            "adapter_id": spec.adapter_id,
+            "embedding_source": spec.embedding_source,
+            "alignment_source": spec.alignment_source,
+            "pooling_version": spec.pooling_version,
+            "artifact_schema_version": spec.artifact_schema_version,
+            "sample_rate": spec.sample_rate,
+        }
+
     def compute_feature_key(self, spec: FeaturePrecomputeSpec) -> str:
-        canonical = json.dumps(spec.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        canonical = json.dumps(self.key_payload(spec), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
     def expected_manifest_paths(self, dataset: str, feature_key: str) -> dict[str, Path]:
@@ -63,6 +76,10 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _read_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def plan_feature_store(spec: FeaturePrecomputeSpec, *, create: bool, active_settings: Settings) -> tuple[str, dict[str, Path]]:
     layout = FeatureStoreLayout(active_settings)
     feature_key = layout.compute_feature_key(spec)
@@ -73,8 +90,15 @@ def plan_feature_store(spec: FeaturePrecomputeSpec, *, create: bool, active_sett
         manifest_paths["split_root"].mkdir(parents=True, exist_ok=True)
         for split in spec.splits:
             (manifest_paths["split_root"] / split).mkdir(parents=True, exist_ok=True)
-        _write_json(manifest_paths["spec"], spec.model_dump(mode="json"))
-        _write_json(manifest_paths["state"], FeatureStoreState(feature_key=feature_key).model_dump(mode="json"))
+        if not manifest_paths["spec"].exists():
+            _write_json(manifest_paths["spec"], spec.model_dump(mode="json"))
+        if not manifest_paths["state"].exists():
+            _write_json(manifest_paths["state"], FeatureStoreState(feature_key=feature_key).model_dump(mode="json"))
+        else:
+            state = FeatureStoreState.model_validate(_read_json(manifest_paths["state"]))
+            if state.feature_key != feature_key:
+                raise ValueError(f"Existing state manifest at {manifest_paths['state']} has mismatched feature_key.")
+            _write_json(manifest_paths["state"], state.model_dump(mode="json"))
 
     return feature_key, manifest_paths
 

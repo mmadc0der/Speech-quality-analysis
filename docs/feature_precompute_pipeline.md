@@ -63,7 +63,6 @@ Each precompute output directory is namespaced by a deterministic hash of the fe
 The hash should change when any of the following changes:
 
 - dataset name
-- split list
 - backbone id
 - backbone revision
 - adapter or LoRA id
@@ -72,6 +71,8 @@ The hash should change when any of the following changes:
 - pooling version
 - artifact schema version
 - sample rate
+
+The hash should not change when you switch from `train val test` to just `train` for a smoke test. Split selection controls which subdirectories are populated, not the cache identity itself.
 
 This lets you safely keep multiple cached feature sets side by side. If you later introduce LoRA or a different pooling method, it automatically lands in a new directory rather than silently mixing artifacts.
 
@@ -91,6 +92,8 @@ This utility is the control-plane layer for the precompute runner.
 The actual feature extractor now lives at:
 
 `python -m pronunciation_backend.training.precompute_features`
+
+The extractor auto-initializes the feature-store by default, so `feature_store plan` is optional once you move to normal runs.
 
 ## Precompute Spec Example
 
@@ -133,7 +136,7 @@ Optional later:
 
 - `/cold/pronunciation/datasets/l2_arctic`
 
-### Step 3. Create a hashed feature-store plan for `speechocean762`
+### Step 3. Optionally create a hashed feature-store plan for `speechocean762`
 
 ```bash
 python -m pronunciation_backend.training.feature_store plan \
@@ -155,7 +158,7 @@ This command creates:
 - `state.json`
 - split directories under the hashed feature-store path
 
-### Step 4. Verify the planned feature-store directory
+### Step 4. Optionally verify the planned feature-store directory
 
 ```bash
 python -m pronunciation_backend.training.feature_store verify \
@@ -173,7 +176,7 @@ python -m pronunciation_backend.training.feature_store verify \
 
 If this passes, the storage contract is ready for the real extractor.
 
-### Step 5. Repeat the same plan for native-reference data
+### Step 5. Optionally repeat the same plan for native-reference data
 
 For example:
 
@@ -232,6 +235,8 @@ python -m pronunciation_backend.training.precompute_features \
   --device cuda \
   --shard-size 2000
 ```
+
+This command auto-creates missing feature-store directories and manifests for the matching cache key before extraction starts.
 
 For a smaller smoke test:
 

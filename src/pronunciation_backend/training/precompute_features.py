@@ -15,6 +15,7 @@ from pronunciation_backend.training.feature_store import (
     FeaturePrecomputeSpec,
     FeatureStoreLayout,
     FeatureStoreState,
+    plan_feature_store,
     verify_feature_store,
 )
 from pronunciation_backend.training.schemas import PhoneEmbeddingArtifact, TrainingPhoneLabel, TrainingUtteranceArtifact
@@ -39,6 +40,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-utterances", type=int)
     parser.add_argument("--min-audio-ms", type=int, default=100)
     parser.add_argument("--max-audio-ms", type=int, default=30_000)
+    parser.add_argument("--auto-plan", action="store_true", default=True)
+    parser.add_argument("--no-auto-plan", action="store_false", dest="auto_plan")
     parser.add_argument("--overwrite", action="store_true")
     return parser
 
@@ -211,18 +214,22 @@ def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
     spec = _spec_from_args(args)
+    if args.auto_plan:
+        feature_key, feature_paths = plan_feature_store(spec, create=True, active_settings=settings)
+    else:
+        layout = FeatureStoreLayout(settings)
+        feature_key = layout.compute_feature_key(spec)
+        feature_paths = layout.expected_manifest_paths(spec.dataset, feature_key)
+
     ok, messages = verify_feature_store(spec, active_settings=settings)
     if not ok:
         for message in messages:
             print(message)
-        print("Run feature_store plan first.")
+        print("Feature store verification failed.")
         return 1
 
     dataset_root = Path(spec.dataset_root)
-    layout = FeatureStoreLayout(settings)
-    feature_key = layout.compute_feature_key(spec)
-    feature_dir = layout.feature_dir(spec.dataset, feature_key)
-    state_path = feature_dir / "state.json"
+    state_path = feature_paths["state"]
 
     model_settings = replace(
         settings,
@@ -268,7 +275,7 @@ def main() -> int:
                 )
             )
 
-        split_dir = feature_dir / "splits" / split
+        split_dir = feature_paths["split_root"] / split
         written_rows = _write_jsonl_shards(split_dir, split_rows, shard_size=args.shard_size, overwrite=args.overwrite)
         state.split_counts[split] = written_rows
         state.utterance_counts[split] = len(utterances)
