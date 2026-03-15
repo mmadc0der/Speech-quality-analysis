@@ -253,37 +253,46 @@ def main() -> int:
     aligned_dir = dataset_root / args.aligned_dir
     total_rows = 0
     total_utterances = 0
-    for split in spec.splits:
-        artifact_path = aligned_dir / f"{split}.jsonl"
-        utterances = _read_artifacts(artifact_path, max_utterances=args.max_utterances)
-        split_rows: list[PhoneEmbeddingArtifact] = []
-        for utterance in utterances:
-            if utterance.split != split:
-                raise ValueError(f"Utterance {utterance.utterance_id} declares split={utterance.split}, expected {split}")
-            audio_path = _resolve_audio_path(dataset_root, utterance.audio_path)
-            prepared = _load_audio(audio_prep, audio_path)
-            encoded = encoder.encode(prepared)
-            spans = _spans_from_labels(utterance.phone_labels, encoded, utterance.canonical_phones, spec.alignment_source)
-            phone_features = feature_builder.build(encoded, spans)
-            split_rows.extend(
-                _artifact_rows(
-                    utterance,
-                    phone_features,
-                    spans,
-                    backbone_id=spec.backbone_id,
-                    embedding_source=spec.embedding_source,
+    try:
+        for split in spec.splits:
+            artifact_path = aligned_dir / f"{split}.jsonl"
+            utterances = _read_artifacts(artifact_path, max_utterances=args.max_utterances)
+            split_rows: list[PhoneEmbeddingArtifact] = []
+            for utterance in utterances:
+                if utterance.split != split:
+                    raise ValueError(f"Utterance {utterance.utterance_id} declares split={utterance.split}, expected {split}")
+                audio_path = _resolve_audio_path(dataset_root, utterance.audio_path)
+                prepared = _load_audio(audio_prep, audio_path)
+                encoded = encoder.encode(prepared)
+                spans = _spans_from_labels(utterance.phone_labels, encoded, utterance.canonical_phones, spec.alignment_source)
+                phone_features = feature_builder.build(encoded, spans)
+                split_rows.extend(
+                    _artifact_rows(
+                        utterance,
+                        phone_features,
+                        spans,
+                        backbone_id=spec.backbone_id,
+                        embedding_source=spec.embedding_source,
+                    )
                 )
-            )
 
-        split_dir = feature_paths["split_root"] / split
-        written_rows = _write_jsonl_shards(split_dir, split_rows, shard_size=args.shard_size, overwrite=args.overwrite)
-        state.split_counts[split] = written_rows
-        state.utterance_counts[split] = len(utterances)
-        _write_json(state_path, state.model_dump(mode="json"))
+            split_dir = feature_paths["split_root"] / split
+            written_rows = _write_jsonl_shards(split_dir, split_rows, shard_size=args.shard_size, overwrite=args.overwrite)
+            state.split_counts[split] = written_rows
+            state.utterance_counts[split] = len(utterances)
+            _write_json(state_path, state.model_dump(mode="json"))
 
-        total_rows += written_rows
-        total_utterances += len(utterances)
-        print(f"split={split} utterances={len(utterances)} rows={written_rows} output_dir={split_dir}")
+            total_rows += written_rows
+            total_utterances += len(utterances)
+            print(f"split={split} utterances={len(utterances)} rows={written_rows} output_dir={split_dir}")
+    except FileNotFoundError as exc:
+        print(str(exc))
+        print("Expected aligned artifacts under: <dataset-root>/aligned/<split>.jsonl")
+        print("Generate aligned training artifacts before feature precompute.")
+        return 1
+    except FileExistsError as exc:
+        print(str(exc))
+        return 1
 
     state.status = "complete"
     _write_json(state_path, state.model_dump(mode="json"))
