@@ -10,22 +10,37 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115.0",
-  "uvicorn[standard]>=0.30.0",
-  "pydantic>=2.8.0",
   "numpy>=1.26.0",
+  "pydantic>=2.8.0",
   "soundfile>=0.12.1",
   "python-multipart>=0.0.9",
+  "uvicorn[standard]>=0.30.0",
 ]
 
 [project.optional-dependencies]
+# Frozen encoder runtime and offline feature precompute.
 ml = [
   "torch>=2.3.0",
   "transformers>=4.44.0",
 ]
+
+# Convenience extra for local development when you want both tests and ML.
+dev = [
+  "torch>=2.3.0",
+  "transformers>=4.44.0",
+  "httpx>=0.27.0",
+  "pytest>=8.2.0",
+]
+
+# Test-only tools. Use with `uv sync --group dev`.
+[dependency-groups]
 dev = [
   "httpx>=0.27.0",
   "pytest>=8.2.0",
 ]
+
+# MFA is intentionally not declared here.
+# On Linux it should live in a separate micromamba/conda environment rather than uv/pip.
 
 [tool.setuptools]
 package-dir = {"" = "src"}
