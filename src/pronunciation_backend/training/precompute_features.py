@@ -10,7 +10,7 @@ from pathlib import Path
 from pronunciation_backend.config import settings
 from pronunciation_backend.models import EncodedFrames, PhoneSpan, PreparedAudio
 from pronunciation_backend.services.aligner import PhoneFeatureBuilder, phone_duration_weight
-from pronunciation_backend.services.audio_prep import AudioPrepService
+from pronunciation_backend.services.audio_prep import AudioPrepService, AudioValidationError
 from pronunciation_backend.services.feature_encoder import SSLFeatureEncoder
 from pronunciation_backend.training.feature_store import (
     FeaturePrecomputeSpec,
@@ -38,6 +38,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", default=settings.device)
     parser.add_argument("--aligned-dir", default="aligned")
     parser.add_argument("--shard-size", type=int, default=2_000)
+    parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--max-utterances", type=int)
     parser.add_argument("--min-audio-ms", type=int, default=100)
     parser.add_argument("--max-audio-ms", type=int, default=30_000)
@@ -223,6 +224,30 @@ def _write_jsonl_shards(split_dir: Path, rows: list[PhoneEmbeddingArtifact], *, 
     return written_rows
 
 
+def _consecutive_audio_groups(
+    utterances: list[TrainingUtteranceArtifact],
+    *,
+    dataset_root: Path,
+) -> list[tuple[Path, list[TrainingUtteranceArtifact]]]:
+    groups: list[tuple[Path, list[TrainingUtteranceArtifact]]] = []
+    current_path: Path | None = None
+    current_items: list[TrainingUtteranceArtifact] = []
+
+    for utterance in utterances:
+        audio_path = _resolve_audio_path(dataset_root, utterance.audio_path)
+        if current_path is None or audio_path != current_path:
+            if current_path is not None:
+                groups.append((current_path, current_items))
+            current_path = audio_path
+            current_items = [utterance]
+        else:
+            current_items.append(utterance)
+
+    if current_path is not None:
+        groups.append((current_path, current_items))
+    return groups
+
+
 def _print_progress(
     *,
     split: str,
@@ -291,40 +316,57 @@ def main() -> int:
             split_rows: list[PhoneEmbeddingArtifact] = []
             split_started_at = time.monotonic()
             total_utterances_in_split = len(utterances)
-            cached_audio_path: Path | None = None
-            cached_prepared: PreparedAudio | None = None
-            cached_encoded: EncodedFrames | None = None
-            for index, utterance in enumerate(utterances, start=1):
-                if utterance.split != split:
-                    raise ValueError(f"Utterance {utterance.utterance_id} declares split={utterance.split}, expected {split}")
-                audio_path = _resolve_audio_path(dataset_root, utterance.audio_path)
-                if cached_audio_path != audio_path:
-                    cached_prepared = _load_audio(audio_prep, audio_path)
-                    cached_encoded = encoder.encode(cached_prepared)
-                    cached_audio_path = audio_path
-                prepared = cached_prepared
-                encoded = cached_encoded
-                if prepared is None or encoded is None:
-                    raise RuntimeError(f"Missing cached audio state for {audio_path}")
-                spans = _spans_from_labels(utterance.phone_labels, encoded, utterance.canonical_phones, spec.alignment_source)
-                phone_features = feature_builder.build(encoded, spans)
-                split_rows.extend(
-                    _artifact_rows(
-                        utterance,
-                        phone_features,
-                        spans,
-                        backbone_id=spec.backbone_id,
-                        embedding_source=spec.embedding_source,
-                    )
-                )
-                if args.progress_every > 0 and (index % args.progress_every == 0 or index == total_utterances_in_split):
+            processed_utterances = 0
+            next_progress_at = args.progress_every if args.progress_every > 0 else None
+            skipped_audio_groups = 0
+            grouped_utterances = _consecutive_audio_groups(utterances, dataset_root=dataset_root)
+
+            for start in range(0, len(grouped_utterances), max(1, args.batch_size)):
+                batch_groups = grouped_utterances[start : start + max(1, args.batch_size)]
+                prepared_batch: list[PreparedAudio] = []
+                valid_groups: list[tuple[Path, list[TrainingUtteranceArtifact]]] = []
+
+                for audio_path, grouped_items in batch_groups:
+                    try:
+                        prepared_batch.append(_load_audio(audio_prep, audio_path))
+                        valid_groups.append((audio_path, grouped_items))
+                    except AudioValidationError as exc:
+                        skipped_audio_groups += 1
+                        processed_utterances += len(grouped_items)
+                        print(f"warning: skipping audio {audio_path} ({exc})")
+                    except FileNotFoundError as exc:
+                        skipped_audio_groups += 1
+                        processed_utterances += len(grouped_items)
+                        print(f"warning: skipping audio {audio_path} ({exc})")
+
+                encoded_batch = encoder.encode_many(prepared_batch)
+                for (_, grouped_items), encoded in zip(valid_groups, encoded_batch):
+                    for utterance in grouped_items:
+                        if utterance.split != split:
+                            raise ValueError(f"Utterance {utterance.utterance_id} declares split={utterance.split}, expected {split}")
+                        spans = _spans_from_labels(utterance.phone_labels, encoded, utterance.canonical_phones, spec.alignment_source)
+                        phone_features = feature_builder.build(encoded, spans)
+                        split_rows.extend(
+                            _artifact_rows(
+                                utterance,
+                                phone_features,
+                                spans,
+                                backbone_id=spec.backbone_id,
+                                embedding_source=spec.embedding_source,
+                            )
+                        )
+                        processed_utterances += 1
+
+                if next_progress_at is not None and (processed_utterances >= next_progress_at or processed_utterances == total_utterances_in_split):
                     _print_progress(
                         split=split,
-                        processed=index,
+                        processed=processed_utterances,
                         total=total_utterances_in_split,
                         split_rows=len(split_rows),
                         started_at=split_started_at,
                     )
+                    while next_progress_at is not None and processed_utterances >= next_progress_at:
+                        next_progress_at += args.progress_every
 
             split_dir = feature_paths["split_root"] / split
             written_rows = _write_jsonl_shards(split_dir, split_rows, shard_size=args.shard_size, overwrite=args.overwrite)
@@ -334,7 +376,10 @@ def main() -> int:
 
             total_rows += written_rows
             total_utterances += len(utterances)
-            print(f"split={split} utterances={len(utterances)} rows={written_rows} output_dir={split_dir}")
+            print(
+                f"split={split} utterances={len(utterances)} rows={written_rows} "
+                f"skipped_audio_groups={skipped_audio_groups} output_dir={split_dir}"
+            )
     except FileNotFoundError as exc:
         print(str(exc))
         print("Expected aligned artifacts under: <dataset-root>/aligned/<split>.jsonl")

@@ -39,6 +39,22 @@ class SSLFeatureEncoder:
             self._warned_fallback = True
         return self._encode_fallback(audio)
 
+    def encode_many(self, audios: list[PreparedAudio]) -> list[EncodedFrames]:
+        if not audios:
+            return []
+        if self.settings.use_hf_encoder and torch is not None:
+            try:
+                return self._encode_many_with_hf(audios)
+            except Exception as exc:
+                if not self._warned_fallback:
+                    print(f"warning: HF batch encoder unavailable, falling back to CPU features: {exc}")
+                    self._warned_fallback = True
+                return [self._encode_fallback(audio) for audio in audios]
+        if self.settings.use_hf_encoder and not self._warned_fallback:
+            print("warning: torch/transformers unavailable, falling back to CPU features")
+            self._warned_fallback = True
+        return [self._encode_fallback(audio) for audio in audios]
+
     def _encode_with_hf(self, audio: PreparedAudio) -> EncodedFrames:
         if self._processor is None or self._model is None:
             self._processor = AutoFeatureExtractor.from_pretrained(self.settings.backbone_id)
@@ -65,6 +81,48 @@ class SSLFeatureEncoder:
             frame_ms=frame_ms,
             energy=energy,
         )
+
+    def _encode_many_with_hf(self, audios: list[PreparedAudio]) -> list[EncodedFrames]:
+        if self._processor is None or self._model is None:
+            self._processor = AutoFeatureExtractor.from_pretrained(self.settings.backbone_id)
+            self._model = AutoModel.from_pretrained(self.settings.backbone_id)
+            self._model.eval()
+            self._model.to(self.settings.device)
+
+        arrays = [np.asarray(audio.samples, dtype=np.float32) for audio in audios]
+        inputs = self._processor(
+            arrays,
+            sampling_rate=audios[0].sample_rate,
+            return_tensors="pt",
+            padding=True,
+        )
+        inputs = {key: value.to(self.settings.device) for key, value in inputs.items()}
+
+        with torch.no_grad():
+            outputs = self._model(**inputs)
+
+        hidden_batch = outputs.last_hidden_state.detach().cpu()
+        attention_mask = inputs.get("attention_mask")
+        if attention_mask is None or not hasattr(self._model, "_get_feat_extract_output_lengths"):
+            return [self._encode_with_hf(audio) for audio in audios]
+
+        sample_lengths = attention_mask.sum(dim=-1).detach().cpu()
+        output_lengths = self._model._get_feat_extract_output_lengths(sample_lengths).tolist()
+
+        encoded_items: list[EncodedFrames] = []
+        for index, (audio, array) in enumerate(zip(audios, arrays)):
+            hidden_length = max(1, int(output_lengths[index]))
+            hidden = hidden_batch[index, :hidden_length].numpy()
+            frame_ms = max(10.0, audio.duration_ms / max(1, hidden.shape[0]))
+            energy = self._frame_energy(array, frame_ms)
+            encoded_items.append(
+                EncodedFrames(
+                    embeddings=hidden.astype(np.float32).tolist(),
+                    frame_ms=frame_ms,
+                    energy=energy,
+                )
+            )
+        return encoded_items
 
     def _encode_fallback(self, audio: PreparedAudio) -> EncodedFrames:
         samples = np.asarray(audio.samples, dtype=np.float32)
