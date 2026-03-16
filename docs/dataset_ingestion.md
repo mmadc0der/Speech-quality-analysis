@@ -93,11 +93,11 @@ Frozen backbone outputs pooled into `PhoneEmbeddingArtifact` rows and written in
 - actual feature precompute runner
 - persistent `LibriTTS` prepared-manifest builder
 - `LibriTTS` aligned-artifact builder from MFA `TextGrid` outputs plus `CMUdict`
+- helper script for parallel `LibriTTS` MFA alignment launches
 
 ### Not implemented yet
 
 - `speechocean762` prepared-manifest builder
-- MFA orchestration inside the repo
 
 ## `LibriTTS` Prepare Command
 
@@ -175,6 +175,43 @@ The command prints periodic progress with:
 - emitted aligned word rows
 - utterances per second
 - ETA in seconds
+
+## Parallel MFA Helper
+
+The repository now includes:
+
+`scripts/run_mfa_parallel_align.sh`
+
+This helper is for the Linux GPU server workflow where you want to launch multiple
+long-running MFA alignment jobs with `nohup`.
+
+It exists to avoid a real MFA race condition: if two fresh `mfa align` processes
+start at the same time with the same acoustic model alias, they can both try to
+unpack the shared model cache under `~/Documents/MFA/extracted_models`, which can
+fail with `FileExistsError`.
+
+The helper avoids that by:
+
+- writing `.lab` sidecars from `*.normalized.txt`
+- starting the first alignment job alone
+- waiting until MFA's shared acoustic-model cache exists
+- starting the remaining subsets in parallel after the cache is ready
+
+Example:
+
+```bash
+bash scripts/run_mfa_parallel_align.sh train-clean-360 test-clean
+```
+
+The script uses these environment variables when you want to override defaults:
+
+- `MFA_BIN`
+- `RAW_ROOT`
+- `MFA_ROOT`
+- `LOG_ROOT`
+- `MFA_CACHE_ROOT`
+
+Defaults match the `/cold` layout used by this project.
 
 ## Recommended Persistent Setup
 
