@@ -23,13 +23,20 @@ class SSLFeatureEncoder:
     settings: Settings
     _processor: object | None = field(default=None, init=False, repr=False)
     _model: object | None = field(default=None, init=False, repr=False)
+    _warned_fallback: bool = field(default=False, init=False, repr=False)
 
     def encode(self, audio: PreparedAudio) -> EncodedFrames:
         if self.settings.use_hf_encoder and torch is not None:
             try:
                 return self._encode_with_hf(audio)
-            except Exception:
+            except Exception as exc:
+                if not self._warned_fallback:
+                    print(f"warning: HF encoder unavailable, falling back to CPU features: {exc}")
+                    self._warned_fallback = True
                 return self._encode_fallback(audio)
+        if self.settings.use_hf_encoder and not self._warned_fallback:
+            print("warning: torch/transformers unavailable, falling back to CPU features")
+            self._warned_fallback = True
         return self._encode_fallback(audio)
 
     def _encode_with_hf(self, audio: PreparedAudio) -> EncodedFrames:

@@ -291,12 +291,21 @@ def main() -> int:
             split_rows: list[PhoneEmbeddingArtifact] = []
             split_started_at = time.monotonic()
             total_utterances_in_split = len(utterances)
+            cached_audio_path: Path | None = None
+            cached_prepared: PreparedAudio | None = None
+            cached_encoded: EncodedFrames | None = None
             for index, utterance in enumerate(utterances, start=1):
                 if utterance.split != split:
                     raise ValueError(f"Utterance {utterance.utterance_id} declares split={utterance.split}, expected {split}")
                 audio_path = _resolve_audio_path(dataset_root, utterance.audio_path)
-                prepared = _load_audio(audio_prep, audio_path)
-                encoded = encoder.encode(prepared)
+                if cached_audio_path != audio_path:
+                    cached_prepared = _load_audio(audio_prep, audio_path)
+                    cached_encoded = encoder.encode(cached_prepared)
+                    cached_audio_path = audio_path
+                prepared = cached_prepared
+                encoded = cached_encoded
+                if prepared is None or encoded is None:
+                    raise RuntimeError(f"Missing cached audio state for {audio_path}")
                 spans = _spans_from_labels(utterance.phone_labels, encoded, utterance.canonical_phones, spec.alignment_source)
                 phone_features = feature_builder.build(encoded, spans)
                 split_rows.extend(
