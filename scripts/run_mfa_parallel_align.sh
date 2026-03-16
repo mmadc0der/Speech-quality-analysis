@@ -58,7 +58,7 @@ launch_align() {
   local out_dir="$MFA_ROOT/${subset}"
 
   mkdir -p "$out_dir"
-  echo "Launching ${subset}..."
+  echo "Launching ${subset}..." >&2
   nohup "$MFA_BIN" align \
     "$RAW_ROOT/$subset" \
     "$DICTIONARY_NAME" \
@@ -71,13 +71,27 @@ launch_align() {
 
 wait_for_model_cache() {
   local pid="$1"
+  local subset="$2"
   local waited=0
   local sleep_s=2
   local timeout_s=300
+  local log_path="$LOG_ROOT/${subset}.align.log"
 
   while [[ ! -d "$MODEL_READY_DIR" ]]; do
     if ! kill -0 "$pid" 2>/dev/null; then
-      echo "Initial MFA job exited before model cache became ready." >&2
+      echo "Initial MFA job for ${subset} exited before model cache became ready." >&2
+      if [[ -f "$log_path" ]]; then
+        echo "Last log lines from ${log_path}:" >&2
+        python - "$log_path" <<'PY' >&2
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+for line in lines[-20:]:
+    print(line)
+PY
+      fi
       return 1
     fi
     if (( waited >= timeout_s )); then
@@ -102,7 +116,7 @@ if [[ ! -d "$MODEL_READY_DIR" ]]; then
   first_subset="${SUBSETS[0]}"
   echo "[warmup] Starting ${first_subset} first so MFA can initialize shared model cache..."
   PIDS["$first_subset"]="$(launch_align "$first_subset")"
-  wait_for_model_cache "${PIDS[$first_subset]}"
+  wait_for_model_cache "${PIDS[$first_subset]}" "$first_subset"
   start_index=1
 fi
 
