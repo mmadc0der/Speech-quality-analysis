@@ -93,7 +93,18 @@ def _resolve_audio_path(dataset_root: Path, audio_path: str) -> Path:
     candidate = Path(audio_path)
     if candidate.is_absolute():
         return candidate
-    return dataset_root / candidate
+    direct = dataset_root / candidate
+    if direct.exists():
+        return direct
+
+    raw_relative = dataset_root / "raw" / candidate
+    if raw_relative.exists():
+        return raw_relative
+
+    raise FileNotFoundError(
+        f"Audio file not found for aligned artifact: {audio_path} "
+        f"(checked {direct} and {raw_relative})"
+    )
 
 
 def _load_audio(audio_prep: AudioPrepService, audio_path: Path) -> PreparedAudio:
