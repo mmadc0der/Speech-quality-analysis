@@ -5,7 +5,9 @@ import json
 import math
 import time
 from dataclasses import replace
+from itertools import islice
 from pathlib import Path
+from typing import Iterable, Iterator
 
 from pronunciation_backend.config import settings
 from pronunciation_backend.models import EncodedFrames, PhoneSpan, PreparedAudio
@@ -39,6 +41,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--aligned-dir", default="aligned")
     parser.add_argument("--shard-size", type=int, default=2_000)
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--max-batch-audio-ms", type=int, default=120_000)
     parser.add_argument("--max-utterances", type=int)
     parser.add_argument("--min-audio-ms", type=int, default=100)
     parser.add_argument("--max-audio-ms", type=int, default=30_000)
@@ -74,20 +77,36 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _read_artifacts(path: Path, *, max_utterances: int | None) -> list[TrainingUtteranceArtifact]:
+def _count_artifacts(path: Path, *, max_utterances: int | None) -> int:
     if not path.exists():
         raise FileNotFoundError(f"Aligned artifact file not found: {path}")
 
-    artifacts: list[TrainingUtteranceArtifact] = []
+    count = 0
     with path.open("r", encoding="utf-8") as handle:
         for raw_line in handle:
             line = raw_line.strip()
             if not line:
                 continue
-            artifacts.append(TrainingUtteranceArtifact.model_validate_json(line))
-            if max_utterances is not None and len(artifacts) >= max_utterances:
+            count += 1
+            if max_utterances is not None and count >= max_utterances:
                 break
-    return artifacts
+    return count
+
+
+def _iter_artifacts(path: Path, *, max_utterances: int | None) -> Iterator[TrainingUtteranceArtifact]:
+    if not path.exists():
+        raise FileNotFoundError(f"Aligned artifact file not found: {path}")
+
+    yielded = 0
+    with path.open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line:
+                continue
+            yield TrainingUtteranceArtifact.model_validate_json(line)
+            yielded += 1
+            if max_utterances is not None and yielded >= max_utterances:
+                break
 
 
 def _resolve_audio_path(dataset_root: Path, audio_path: str) -> Path:
@@ -109,7 +128,7 @@ def _resolve_audio_path(dataset_root: Path, audio_path: str) -> Path:
 
 
 def _load_audio(audio_prep: AudioPrepService, audio_path: Path) -> PreparedAudio:
-    return audio_prep.decode(audio_path.read_bytes())
+    return audio_prep.decode_path(audio_path)
 
 
 def _alignment_confidence(source: str) -> float:
@@ -203,33 +222,50 @@ def _artifact_rows(
     return rows
 
 
-def _write_jsonl_shards(split_dir: Path, rows: list[PhoneEmbeddingArtifact], *, shard_size: int, overwrite: bool) -> int:
-    split_dir.mkdir(parents=True, exist_ok=True)
-    if overwrite:
-        for existing in split_dir.glob("part-*.jsonl"):
-            existing.unlink()
-    elif any(split_dir.glob("part-*.jsonl")):
-        raise FileExistsError(f"Refusing to overwrite existing shard files in {split_dir}. Use --overwrite to replace them.")
+class _JsonlShardWriter:
+    def __init__(self, split_dir: Path, *, shard_size: int, overwrite: bool) -> None:
+        self.split_dir = split_dir
+        self.shard_size = max(1, shard_size)
+        self.written_rows = 0
+        self._shard_index = 0
+        self._rows_in_shard = 0
+        self._handle = None
 
-    shard_index = 0
-    written_rows = 0
-    for start in range(0, len(rows), shard_size):
-        shard_rows = rows[start : start + shard_size]
-        target = split_dir / f"part-{shard_index:04d}.jsonl"
-        with target.open("w", encoding="utf-8") as handle:
-            for row in shard_rows:
-                handle.write(row.model_dump_json() + "\n")
-        shard_index += 1
-        written_rows += len(shard_rows)
-    return written_rows
+        split_dir.mkdir(parents=True, exist_ok=True)
+        if overwrite:
+            for existing in split_dir.glob("part-*.jsonl"):
+                existing.unlink()
+        elif any(split_dir.glob("part-*.jsonl")):
+            raise FileExistsError(f"Refusing to overwrite existing shard files in {split_dir}. Use --overwrite to replace them.")
+
+    def append_rows(self, rows: list[PhoneEmbeddingArtifact]) -> None:
+        for row in rows:
+            if self._handle is None or self._rows_in_shard >= self.shard_size:
+                self._open_next_shard()
+            self._handle.write(row.model_dump_json() + "\n")
+            self._rows_in_shard += 1
+            self.written_rows += 1
+
+    def close(self) -> int:
+        if self._handle is not None:
+            self._handle.close()
+            self._handle = None
+        return self.written_rows
+
+    def _open_next_shard(self) -> None:
+        if self._handle is not None:
+            self._handle.close()
+        target = self.split_dir / f"part-{self._shard_index:04d}.jsonl"
+        self._handle = target.open("w", encoding="utf-8")
+        self._shard_index += 1
+        self._rows_in_shard = 0
 
 
-def _consecutive_audio_groups(
-    utterances: list[TrainingUtteranceArtifact],
+def _iter_consecutive_audio_groups(
+    utterances: Iterable[TrainingUtteranceArtifact],
     *,
     dataset_root: Path,
-) -> list[tuple[Path, list[TrainingUtteranceArtifact]]]:
-    groups: list[tuple[Path, list[TrainingUtteranceArtifact]]] = []
+) -> Iterator[tuple[Path, list[TrainingUtteranceArtifact]]]:
     current_path: Path | None = None
     current_items: list[TrainingUtteranceArtifact] = []
 
@@ -237,15 +273,41 @@ def _consecutive_audio_groups(
         audio_path = _resolve_audio_path(dataset_root, utterance.audio_path)
         if current_path is None or audio_path != current_path:
             if current_path is not None:
-                groups.append((current_path, current_items))
+                yield current_path, current_items
             current_path = audio_path
             current_items = [utterance]
         else:
             current_items.append(utterance)
 
     if current_path is not None:
-        groups.append((current_path, current_items))
-    return groups
+        yield current_path, current_items
+
+
+def _iter_prepared_sub_batches(
+    valid_groups: list[tuple[Path, list[TrainingUtteranceArtifact]]],
+    prepared_batch: list[PreparedAudio],
+    *,
+    max_batch_audio_ms: int,
+) -> Iterator[tuple[list[tuple[Path, list[TrainingUtteranceArtifact]]], list[PreparedAudio]]]:
+    current_groups: list[tuple[Path, list[TrainingUtteranceArtifact]]] = []
+    current_audios: list[PreparedAudio] = []
+    current_total_ms = 0
+    capped_limit = max(1, max_batch_audio_ms)
+
+    for group, prepared in zip(valid_groups, prepared_batch):
+        prepared_ms = max(1, prepared.duration_ms)
+        would_exceed = current_audios and current_total_ms + prepared_ms > capped_limit
+        if would_exceed:
+            yield current_groups, current_audios
+            current_groups = []
+            current_audios = []
+            current_total_ms = 0
+        current_groups.append(group)
+        current_audios.append(prepared)
+        current_total_ms += prepared_ms
+
+    if current_audios:
+        yield current_groups, current_audios
 
 
 def _print_progress(
@@ -312,17 +374,22 @@ def main() -> int:
     try:
         for split in spec.splits:
             artifact_path = aligned_dir / f"{split}.jsonl"
-            utterances = _read_artifacts(artifact_path, max_utterances=args.max_utterances)
-            split_rows: list[PhoneEmbeddingArtifact] = []
             split_started_at = time.monotonic()
-            total_utterances_in_split = len(utterances)
+            total_utterances_in_split = _count_artifacts(artifact_path, max_utterances=args.max_utterances)
             processed_utterances = 0
             next_progress_at = args.progress_every if args.progress_every > 0 else None
             skipped_audio_groups = 0
-            grouped_utterances = _consecutive_audio_groups(utterances, dataset_root=dataset_root)
+            grouped_utterances = _iter_consecutive_audio_groups(
+                _iter_artifacts(artifact_path, max_utterances=args.max_utterances),
+                dataset_root=dataset_root,
+            )
+            split_dir = feature_paths["split_root"] / split
+            writer = _JsonlShardWriter(split_dir, shard_size=args.shard_size, overwrite=args.overwrite)
 
-            for start in range(0, len(grouped_utterances), max(1, args.batch_size)):
-                batch_groups = grouped_utterances[start : start + max(1, args.batch_size)]
+            while True:
+                batch_groups = list(islice(grouped_utterances, max(1, args.batch_size)))
+                if not batch_groups:
+                    break
                 prepared_batch: list[PreparedAudio] = []
                 valid_groups: list[tuple[Path, list[TrainingUtteranceArtifact]]] = []
 
@@ -339,45 +406,65 @@ def main() -> int:
                         processed_utterances += len(grouped_items)
                         print(f"warning: skipping audio {audio_path} ({exc})")
 
-                encoded_batch = encoder.encode_many(prepared_batch)
-                for (_, grouped_items), encoded in zip(valid_groups, encoded_batch):
-                    for utterance in grouped_items:
-                        if utterance.split != split:
-                            raise ValueError(f"Utterance {utterance.utterance_id} declares split={utterance.split}, expected {split}")
-                        spans = _spans_from_labels(utterance.phone_labels, encoded, utterance.canonical_phones, spec.alignment_source)
-                        phone_features = feature_builder.build(encoded, spans)
-                        split_rows.extend(
-                            _artifact_rows(
-                                utterance,
-                                phone_features,
-                                spans,
-                                backbone_id=spec.backbone_id,
-                                embedding_source=spec.embedding_source,
-                            )
+                if not prepared_batch:
+                    if next_progress_at is not None and (processed_utterances >= next_progress_at or processed_utterances == total_utterances_in_split):
+                        _print_progress(
+                            split=split,
+                            processed=processed_utterances,
+                            total=total_utterances_in_split,
+                            split_rows=writer.written_rows,
+                            started_at=split_started_at,
                         )
-                        processed_utterances += 1
+                        while next_progress_at is not None and processed_utterances >= next_progress_at:
+                            next_progress_at += args.progress_every
+                    continue
+
+                for sub_groups, sub_audios in _iter_prepared_sub_batches(
+                    valid_groups,
+                    prepared_batch,
+                    max_batch_audio_ms=args.max_batch_audio_ms,
+                ):
+                    encoded_batch = encoder.encode_many(sub_audios)
+                    for (_, grouped_items), encoded in zip(sub_groups, encoded_batch):
+                        for utterance in grouped_items:
+                            if utterance.split != split:
+                                raise ValueError(f"Utterance {utterance.utterance_id} declares split={utterance.split}, expected {split}")
+                            spans = _spans_from_labels(utterance.phone_labels, encoded, utterance.canonical_phones, spec.alignment_source)
+                            phone_features = feature_builder.build(encoded, spans)
+                            writer.append_rows(
+                                _artifact_rows(
+                                    utterance,
+                                    phone_features,
+                                    spans,
+                                    backbone_id=spec.backbone_id,
+                                    embedding_source=spec.embedding_source,
+                                )
+                            )
+                            processed_utterances += 1
 
                 if next_progress_at is not None and (processed_utterances >= next_progress_at or processed_utterances == total_utterances_in_split):
                     _print_progress(
                         split=split,
                         processed=processed_utterances,
                         total=total_utterances_in_split,
-                        split_rows=len(split_rows),
+                        split_rows=writer.written_rows,
                         started_at=split_started_at,
                     )
+                    state.split_counts[split] = writer.written_rows
+                    state.utterance_counts[split] = processed_utterances
+                    _write_json(state_path, state.model_dump(mode="json"))
                     while next_progress_at is not None and processed_utterances >= next_progress_at:
                         next_progress_at += args.progress_every
 
-            split_dir = feature_paths["split_root"] / split
-            written_rows = _write_jsonl_shards(split_dir, split_rows, shard_size=args.shard_size, overwrite=args.overwrite)
+            written_rows = writer.close()
             state.split_counts[split] = written_rows
-            state.utterance_counts[split] = len(utterances)
+            state.utterance_counts[split] = processed_utterances
             _write_json(state_path, state.model_dump(mode="json"))
 
             total_rows += written_rows
-            total_utterances += len(utterances)
+            total_utterances += processed_utterances
             print(
-                f"split={split} utterances={len(utterances)} rows={written_rows} "
+                f"split={split} utterances={processed_utterances} rows={written_rows} "
                 f"skipped_audio_groups={skipped_audio_groups} output_dir={split_dir}"
             )
     except FileNotFoundError as exc:

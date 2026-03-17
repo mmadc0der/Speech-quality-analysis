@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import soundfile as sf
@@ -27,6 +28,19 @@ class AudioPrepService:
         except RuntimeError as exc:
             raise AudioValidationError("Unsupported or invalid audio file.") from exc
 
+        return self._prepare_audio(samples, sample_rate)
+
+    def decode_path(self, path: str | Path) -> PreparedAudio:
+        try:
+            samples, sample_rate = sf.read(Path(path), dtype="float32", always_2d=False)
+        except RuntimeError as exc:
+            raise AudioValidationError("Unsupported or invalid audio file.") from exc
+        except OSError as exc:
+            raise AudioValidationError(f"Unable to read audio file: {path}") from exc
+
+        return self._prepare_audio(samples, sample_rate)
+
+    def _prepare_audio(self, samples: np.ndarray, sample_rate: int) -> PreparedAudio:
         mono = self._to_mono(samples)
         resampled = self._resample(mono, sample_rate, self.settings.sample_rate)
         normalized = self._normalize(resampled)

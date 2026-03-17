@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -45,6 +46,22 @@ class SSLFeatureEncoder:
         if self.settings.use_hf_encoder and torch is not None:
             try:
                 return self._encode_many_with_hf(audios)
+            except RuntimeError as exc:
+                if self._is_oom_error(exc):
+                    if len(audios) == 1:
+                        if self._is_cuda_device():
+                            self._clear_cuda_cache()
+                        if not self._warned_fallback:
+                            print("warning: GPU OOM on single audio batch, falling back to CPU features for that item")
+                            self._warned_fallback = True
+                        return [self._encode_fallback(audios[0])]
+                    if self._is_cuda_device():
+                        self._clear_cuda_cache()
+                    midpoint = max(1, len(audios) // 2)
+                    left = self.encode_many(audios[:midpoint])
+                    right = self.encode_many(audios[midpoint:])
+                    return left + right
+                raise
             except Exception as exc:
                 if not self._warned_fallback:
                     print(f"warning: HF batch encoder unavailable, falling back to CPU features: {exc}")
@@ -56,11 +73,7 @@ class SSLFeatureEncoder:
         return [self._encode_fallback(audio) for audio in audios]
 
     def _encode_with_hf(self, audio: PreparedAudio) -> EncodedFrames:
-        if self._processor is None or self._model is None:
-            self._processor = AutoFeatureExtractor.from_pretrained(self.settings.backbone_id)
-            self._model = AutoModel.from_pretrained(self.settings.backbone_id)
-            self._model.eval()
-            self._model.to(self.settings.device)
+        self._ensure_hf_model()
 
         array = np.asarray(audio.samples, dtype=np.float32)
         inputs = self._processor(
@@ -70,10 +83,10 @@ class SSLFeatureEncoder:
         )
         inputs = {key: value.to(self.settings.device) for key, value in inputs.items()}
 
-        with torch.no_grad():
-            outputs = self._model(**inputs)
+        outputs = self._forward_hf(inputs)
 
-        hidden = outputs.last_hidden_state.squeeze(0).detach().cpu().numpy()
+        hidden = outputs.last_hidden_state.squeeze(0).detach().to("cpu", dtype=torch.float32).numpy()
+        del outputs
         frame_ms = max(10.0, audio.duration_ms / max(1, hidden.shape[0]))
         energy = self._frame_energy(array, frame_ms)
         return EncodedFrames(
@@ -83,11 +96,7 @@ class SSLFeatureEncoder:
         )
 
     def _encode_many_with_hf(self, audios: list[PreparedAudio]) -> list[EncodedFrames]:
-        if self._processor is None or self._model is None:
-            self._processor = AutoFeatureExtractor.from_pretrained(self.settings.backbone_id)
-            self._model = AutoModel.from_pretrained(self.settings.backbone_id)
-            self._model.eval()
-            self._model.to(self.settings.device)
+        self._ensure_hf_model()
 
         arrays = [np.asarray(audio.samples, dtype=np.float32) for audio in audios]
         inputs = self._processor(
@@ -98,16 +107,16 @@ class SSLFeatureEncoder:
         )
         inputs = {key: value.to(self.settings.device) for key, value in inputs.items()}
 
-        with torch.no_grad():
-            outputs = self._model(**inputs)
+        outputs = self._forward_hf(inputs)
 
-        hidden_batch = outputs.last_hidden_state.detach().cpu()
+        hidden_batch = outputs.last_hidden_state.detach().to("cpu", dtype=torch.float32)
         attention_mask = inputs.get("attention_mask")
         if attention_mask is None or not hasattr(self._model, "_get_feat_extract_output_lengths"):
             return [self._encode_with_hf(audio) for audio in audios]
 
         sample_lengths = attention_mask.sum(dim=-1).detach().cpu()
         output_lengths = self._model._get_feat_extract_output_lengths(sample_lengths).tolist()
+        del outputs
 
         encoded_items: list[EncodedFrames] = []
         for index, (audio, array) in enumerate(zip(audios, arrays)):
@@ -123,6 +132,35 @@ class SSLFeatureEncoder:
                 )
             )
         return encoded_items
+
+    def _ensure_hf_model(self) -> None:
+        if self._processor is not None and self._model is not None:
+            return
+        self._processor = AutoFeatureExtractor.from_pretrained(self.settings.backbone_id)
+        self._model = AutoModel.from_pretrained(self.settings.backbone_id, low_cpu_mem_usage=True)
+        self._model.eval()
+        self._model.to(self.settings.device)
+
+    def _forward_hf(self, inputs: dict[str, object]) -> object:
+        autocast_context = (
+            torch.autocast(device_type="cuda", dtype=torch.float16)
+            if self._is_cuda_device()
+            else nullcontext()
+        )
+        with torch.inference_mode():
+            with autocast_context:
+                return self._model(**inputs)
+
+    def _is_cuda_device(self) -> bool:
+        return torch is not None and str(self.settings.device).startswith("cuda")
+
+    def _is_oom_error(self, exc: BaseException) -> bool:
+        message = str(exc).lower()
+        return "out of memory" in message or "cuda error: out of memory" in message
+
+    def _clear_cuda_cache(self) -> None:
+        if torch is not None and torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def _encode_fallback(self, audio: PreparedAudio) -> EncodedFrames:
         samples = np.asarray(audio.samples, dtype=np.float32)
