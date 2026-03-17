@@ -131,8 +131,6 @@ class SSLFeatureEncoder:
     def release_batch_view(self, batch_view: EncodedBatchView) -> None:
         batch_view.hidden_batch = None
         batch_view.encoded_items = None
-        if self._is_cuda_device():
-            self._clear_cuda_cache()
 
     def _encode_with_hf(self, audio: PreparedAudio) -> EncodedFrames:
         self._ensure_hf_model()
