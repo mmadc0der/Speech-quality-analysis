@@ -58,7 +58,7 @@ class AudioPrepService:
         quality_status = self._quality_status(rms, clipping_ratio, silence_ratio)
 
         return PreparedAudio(
-            samples=normalized.astype(np.float32).tolist(),
+            samples=normalized.astype(np.float32),
             sample_rate=self.settings.sample_rate,
             duration_ms=duration_ms,
             rms=rms,

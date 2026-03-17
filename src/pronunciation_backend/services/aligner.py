@@ -56,14 +56,16 @@ class ConstrainedPhonemeAligner:
 
         spans: list[PhoneSpan] = []
         cursor = 0
-        mean_energy = float(np.mean(encoded.energy)) if encoded.energy else 0.0
+        mean_energy = float(np.mean(encoded.energy)) if encoded.energy.size > 0 else 0.0
         for phone, length in zip(phones, raw_lengths):
             start_frame = cursor
             end_frame = min(frame_count, cursor + int(length))
             if end_frame <= start_frame:
                 end_frame = min(frame_count, start_frame + 1)
 
-            segment_energy = encoded.energy[start_frame:end_frame] or [mean_energy]
+            segment_energy = encoded.energy[start_frame:end_frame]
+            if segment_energy.size == 0:
+                segment_energy = np.asarray([mean_energy], dtype=np.float32)
             energy_ratio = float(np.mean(segment_energy) / (mean_energy + 1e-6)) if mean_energy else 1.0
             expected_weight = phone_duration_weight(phone)
             observed_weight = max(0.5, (end_frame - start_frame) / max(1.0, frame_count / len(phones)))
@@ -102,7 +104,7 @@ class ConstrainedPhonemeAligner:
 class PhoneFeatureBuilder:
     def build(self, encoded: EncodedFrames, spans: list[PhoneSpan]) -> list[PhoneFeatures]:
         frame_array = np.asarray(encoded.embeddings, dtype=np.float32)
-        energy_array = np.asarray(encoded.energy, dtype=np.float32) if encoded.energy else np.zeros((1,), dtype=np.float32)
+        energy_array = np.asarray(encoded.energy, dtype=np.float32) if encoded.energy.size > 0 else np.zeros((1,), dtype=np.float32)
         late_threshold_ms = encoded.frame_ms * 1.5
 
         features: list[PhoneFeatures] = []

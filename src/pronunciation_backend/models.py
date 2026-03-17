@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+import numpy as np
 from pydantic import BaseModel, Field
 
 
@@ -70,7 +71,7 @@ class LexiconEntry:
 
 @dataclass(frozen=True)
 class PreparedAudio:
-    samples: list[float]
+    samples: np.ndarray
     sample_rate: int
     duration_ms: int
     rms: float
@@ -82,9 +83,9 @@ class PreparedAudio:
 
 @dataclass(frozen=True)
 class EncodedFrames:
-    embeddings: list[list[float]]
+    embeddings: np.ndarray
     frame_ms: float
-    energy: list[float]
+    energy: np.ndarray
 
 
 @dataclass(frozen=True)

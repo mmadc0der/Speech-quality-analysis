@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 from pronunciation_backend.config import settings
-from pronunciation_backend.models import EncodedFrames, PhoneSpan, PreparedAudio
-from pronunciation_backend.services.aligner import PhoneFeatureBuilder, phone_duration_weight
+from pronunciation_backend.models import PhoneSpan, PreparedAudio
+from pronunciation_backend.services.aligner import phone_duration_weight
 from pronunciation_backend.services.audio_prep import AudioPrepService, AudioValidationError
 from pronunciation_backend.services.feature_encoder import SSLFeatureEncoder
 from pronunciation_backend.training.feature_store import (
@@ -139,9 +139,16 @@ def _alignment_confidence(source: str) -> float:
     return 0.85
 
 
-def _spans_from_labels(labels: list[TrainingPhoneLabel], encoded: EncodedFrames, phones: list[str], alignment_source: str) -> list[PhoneSpan]:
-    frame_count = max(1, len(encoded.embeddings))
-    frame_ms = max(encoded.frame_ms, 1e-6)
+def _spans_from_labels(
+    labels: list[TrainingPhoneLabel],
+    *,
+    frame_count: int,
+    frame_ms: float,
+    phones: list[str],
+    alignment_source: str,
+) -> list[PhoneSpan]:
+    frame_count = max(1, frame_count)
+    frame_ms = max(frame_ms, 1e-6)
     expected_weights = [phone_duration_weight(phone) for phone in phones]
     expected_total = max(sum(expected_weights), 1e-6)
 
@@ -360,7 +367,6 @@ def main() -> int:
     )
     audio_prep = AudioPrepService(model_settings)
     encoder = SSLFeatureEncoder(model_settings)
-    feature_builder = PhoneFeatureBuilder()
 
     state_payload = _load_json(state_path)
     state = FeatureStoreState.model_validate(state_payload)
@@ -424,13 +430,21 @@ def main() -> int:
                     prepared_batch,
                     max_batch_audio_ms=args.max_batch_audio_ms,
                 ):
-                    encoded_batch = encoder.encode_many(sub_audios)
-                    for (_, grouped_items), encoded in zip(sub_groups, encoded_batch):
+                    encoded_batch = encoder.encode_many_for_pooling(sub_audios)
+                    for batch_index, (_, grouped_items) in enumerate(sub_groups):
+                        frame_count = encoded_batch.frame_counts[batch_index]
+                        frame_ms = encoded_batch.frame_mss[batch_index]
                         for utterance in grouped_items:
                             if utterance.split != split:
                                 raise ValueError(f"Utterance {utterance.utterance_id} declares split={utterance.split}, expected {split}")
-                            spans = _spans_from_labels(utterance.phone_labels, encoded, utterance.canonical_phones, spec.alignment_source)
-                            phone_features = feature_builder.build(encoded, spans)
+                            spans = _spans_from_labels(
+                                utterance.phone_labels,
+                                frame_count=frame_count,
+                                frame_ms=frame_ms,
+                                phones=utterance.canonical_phones,
+                                alignment_source=spec.alignment_source,
+                            )
+                            phone_features = encoder.build_phone_features(encoded_batch, batch_index, spans)
                             writer.append_rows(
                                 _artifact_rows(
                                     utterance,
@@ -441,6 +455,7 @@ def main() -> int:
                                 )
                             )
                             processed_utterances += 1
+                    encoder.release_batch_view(encoded_batch)
 
                 if next_progress_at is not None and (processed_utterances >= next_progress_at or processed_utterances == total_utterances_in_split):
                     _print_progress(
