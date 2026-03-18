@@ -33,91 +33,53 @@ class SSLFeatureEncoder:
     settings: Settings
     _processor: object | None = field(default=None, init=False, repr=False)
     _model: object | None = field(default=None, init=False, repr=False)
-    _warned_fallback: bool = field(default=False, init=False, repr=False)
 
     def encode(self, audio: PreparedAudio) -> EncodedFrames:
-        if self.settings.use_hf_encoder and torch is not None:
-            try:
-                return self._encode_with_hf(audio)
-            except Exception as exc:
-                if not self._warned_fallback:
-                    print(f"warning: HF encoder unavailable, falling back to CPU features: {exc}")
-                    self._warned_fallback = True
-                return self._encode_fallback(audio)
-        if self.settings.use_hf_encoder and not self._warned_fallback:
-            print("warning: torch/transformers unavailable, falling back to CPU features")
-            self._warned_fallback = True
-        return self._encode_fallback(audio)
+        if not self.settings.use_hf_encoder:
+            raise RuntimeError("HF encoder is disabled in settings, but CPU fallback has been removed.")
+        if torch is None:
+            raise RuntimeError("torch or transformers not installed, but required for HF encoder.")
+        return self._encode_with_hf(audio)
 
     def encode_many(self, audios: list[PreparedAudio]) -> list[EncodedFrames]:
         if not audios:
             return []
-        if self.settings.use_hf_encoder and torch is not None:
-            try:
-                return self._encode_many_with_hf(audios)
-            except RuntimeError as exc:
-                if self._is_oom_error(exc):
-                    if len(audios) == 1:
-                        if self._is_cuda_device():
-                            self._clear_cuda_cache()
-                        if not self._warned_fallback:
-                            print("warning: GPU OOM on single audio batch, falling back to CPU features for that item")
-                            self._warned_fallback = True
-                        return [self._encode_fallback(audios[0])]
-                    if self._is_cuda_device():
-                        self._clear_cuda_cache()
-                    midpoint = max(1, len(audios) // 2)
-                    return self.encode_many(audios[:midpoint]) + self.encode_many(audios[midpoint:])
-                raise
-            except Exception as exc:
-                if not self._warned_fallback:
-                    print(f"warning: HF batch encoder unavailable, falling back to CPU features: {exc}")
-                    self._warned_fallback = True
-                return [self._encode_fallback(audio) for audio in audios]
-        if self.settings.use_hf_encoder and not self._warned_fallback:
-            print("warning: torch/transformers unavailable, falling back to CPU features")
-            self._warned_fallback = True
-        return [self._encode_fallback(audio) for audio in audios]
+        if not self.settings.use_hf_encoder:
+            raise RuntimeError("HF encoder is disabled in settings, but CPU fallback has been removed.")
+        if torch is None:
+            raise RuntimeError("torch or transformers not installed, but required for HF encoder.")
+        try:
+            return self._encode_many_with_hf(audios)
+        except RuntimeError as exc:
+            if self._is_oom_error(exc):
+                if len(audios) == 1:
+                    raise RuntimeError(f"GPU OOM on single audio batch (duration: {audios[0].duration_ms}ms). Audio is too long to fit in VRAM.") from exc
+                if self._is_cuda_device():
+                    self._clear_cuda_cache()
+                midpoint = max(1, len(audios) // 2)
+                return self.encode_many(audios[:midpoint]) + self.encode_many(audios[midpoint:])
+            raise
 
     def encode_many_for_pooling(self, audios: list[PreparedAudio]) -> EncodedBatchView:
         if not audios:
             return EncodedBatchView(frame_counts=[], frame_mss=[], energies=[], encoded_items=[])
-        if self.settings.use_hf_encoder and torch is not None:
-            try:
-                return self._encode_many_for_pooling_with_hf(audios)
-            except RuntimeError as exc:
-                if self._is_oom_error(exc):
-                    if len(audios) == 1:
-                        if self._is_cuda_device():
-                            self._clear_cuda_cache()
-                        if not self._warned_fallback:
-                            print("warning: GPU OOM on single audio batch, falling back to CPU pooling for that item")
-                            self._warned_fallback = True
-                        encoded = [self._encode_fallback(audios[0])]
-                        return EncodedBatchView(
-                            frame_counts=[len(encoded[0].embeddings)],
-                            frame_mss=[encoded[0].frame_ms],
-                            energies=[encoded[0].energy],
-                            encoded_items=encoded,
-                        )
-                    if self._is_cuda_device():
-                        self._clear_cuda_cache()
-                    midpoint = max(1, len(audios) // 2)
-                    left = self.encode_many_for_pooling(audios[:midpoint])
-                    right = self.encode_many_for_pooling(audios[midpoint:])
-                    return self._concat_batch_views(left, right)
-                raise
-            except Exception as exc:
-                if not self._warned_fallback:
-                    print(f"warning: HF pooled encoder unavailable, falling back to CPU pooling: {exc}")
-                    self._warned_fallback = True
-        encoded_items = [self._encode_fallback(audio) for audio in audios]
-        return EncodedBatchView(
-            frame_counts=[len(item.embeddings) for item in encoded_items],
-            frame_mss=[item.frame_ms for item in encoded_items],
-            energies=[item.energy for item in encoded_items],
-            encoded_items=encoded_items,
-        )
+        if not self.settings.use_hf_encoder:
+            raise RuntimeError("HF encoder is disabled in settings, but CPU fallback has been removed.")
+        if torch is None:
+            raise RuntimeError("torch or transformers not installed, but required for HF encoder.")
+        try:
+            return self._encode_many_for_pooling_with_hf(audios)
+        except RuntimeError as exc:
+            if self._is_oom_error(exc):
+                if len(audios) == 1:
+                    raise RuntimeError(f"GPU OOM on single audio batch (duration: {audios[0].duration_ms}ms). Audio is too long to fit in VRAM.") from exc
+                if self._is_cuda_device():
+                    self._clear_cuda_cache()
+                midpoint = max(1, len(audios) // 2)
+                left = self.encode_many_for_pooling(audios[:midpoint])
+                right = self.encode_many_for_pooling(audios[midpoint:])
+                return self._concat_batch_views(left, right)
+            raise
 
     def build_phone_features(self, batch_view: EncodedBatchView, index: int, spans: list[PhoneSpan]) -> list[PhoneFeatures]:
         if batch_view.hidden_batch is not None and torch is not None:
@@ -202,15 +164,6 @@ class SSLFeatureEncoder:
             frame_mss=frame_mss,
             energies=energies,
             hidden_batch=outputs.last_hidden_state.detach(),
-        )
-
-    def encode_many_for_pooling_fallback(self, audios: list[PreparedAudio]) -> EncodedBatchView:
-        encoded_items = [self._encode_fallback(audio) for audio in audios]
-        return EncodedBatchView(
-            frame_counts=[len(item.embeddings) for item in encoded_items],
-            frame_mss=[item.frame_ms for item in encoded_items],
-            energies=[item.energy for item in encoded_items],
-            encoded_items=encoded_items,
         )
 
     def _ensure_hf_model(self) -> None:
@@ -344,33 +297,6 @@ class SSLFeatureEncoder:
     def _clear_cuda_cache(self) -> None:
         if torch is not None and torch.cuda.is_available():
             torch.cuda.empty_cache()
-
-    def _encode_fallback(self, audio: PreparedAudio) -> EncodedFrames:
-        samples = np.asarray(audio.samples, dtype=np.float32)
-        frame_size = int(0.02 * audio.sample_rate)
-        hop_size = int(0.01 * audio.sample_rate)
-        if len(samples) < frame_size:
-            samples = np.pad(samples, (0, frame_size - len(samples)))
-
-        frames: list[np.ndarray] = []
-        energy: list[float] = []
-        for start in range(0, len(samples) - frame_size + 1, hop_size):
-            window = samples[start : start + frame_size]
-            spectrum = np.abs(np.fft.rfft(window))
-            band_edges = np.array_split(spectrum, 8)
-            embedding = np.asarray([float(np.mean(band)) for band in band_edges], dtype=np.float32)
-            frames.append(embedding)
-            energy.append(float(np.sqrt(np.mean(np.square(window)))))
-
-        if not frames:
-            frames = [np.zeros((8,), dtype=np.float32)]
-            energy = [0.0]
-
-        return EncodedFrames(
-            embeddings=np.stack(frames).astype(np.float32),
-            frame_ms=(hop_size / audio.sample_rate) * 1000.0,
-            energy=np.asarray(energy, dtype=np.float32),
-        )
 
     def _frame_energy(self, samples: np.ndarray, frame_ms: float) -> np.ndarray:
         frame_size = max(1, int((frame_ms / 1000.0) * self.settings.sample_rate))
