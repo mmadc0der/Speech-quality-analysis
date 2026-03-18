@@ -181,14 +181,17 @@ class SSLFeatureEncoder:
             sampling_rate=audios[0].sample_rate,
             return_tensors="pt",
             padding=True,
+            return_attention_mask=True,
         )
         inputs = {key: value.to(self.settings.device) for key, value in inputs.items()}
 
         outputs = self._forward_hf(inputs)
         attention_mask = inputs.get("attention_mask")
-        if attention_mask is None or not hasattr(self._model, "_get_feat_extract_output_lengths"):
-            del outputs
-            return self.encode_many_for_pooling_fallback(audios)
+        if attention_mask is None:
+            attention_mask = torch.ones_like(inputs["input_values"])
+            
+        if not hasattr(self._model, "_get_feat_extract_output_lengths"):
+            raise RuntimeError(f"Model {type(self._model)} does not support _get_feat_extract_output_lengths")
 
         sample_lengths = attention_mask.sum(dim=-1).detach().cpu()
         output_lengths = [max(1, int(length)) for length in self._model._get_feat_extract_output_lengths(sample_lengths).tolist()]
