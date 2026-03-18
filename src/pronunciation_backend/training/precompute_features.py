@@ -317,22 +317,23 @@ def _iter_prepared_sub_batches(
         yield current_groups, current_audios
 
 
-def _print_progress(
-    *,
-    split: str,
-    processed: int,
-    total: int,
-    split_rows: int,
-    started_at: float,
-) -> None:
-    elapsed = max(1e-6, time.monotonic() - started_at)
-    rate = processed / elapsed
-    remaining = max(0, total - processed)
-    eta_seconds = int(round(remaining / rate)) if rate > 0 else 0
-    print(
-        f"split={split} progress={processed}/{total} "
-        f"rows={split_rows} utt_per_s={rate:.2f} eta_s={eta_seconds}"
-    )
+    def _print_progress(
+        *,
+        split: str,
+        processed: int,
+        total: int,
+        split_rows: int,
+        started_at: float,
+    ) -> None:
+        elapsed = max(1e-6, time.monotonic() - started_at)
+        rate = processed / elapsed
+        remaining = max(0, total - processed)
+        eta_seconds = int(round(remaining / rate)) if rate > 0 else 0
+        print(
+            f"split={split} progress={processed}/{total} "
+            f"rows={split_rows} utt_per_s={rate:.2f} eta_s={eta_seconds}",
+            flush=True
+        )
 
 
 def main() -> int:
