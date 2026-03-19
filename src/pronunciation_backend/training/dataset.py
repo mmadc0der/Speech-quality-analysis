@@ -75,26 +75,26 @@ class WordIterableDataset(IterableDataset):
                 p["duration_z_score"], 
                 p["energy_mean"]
             ]
-            acoustic_features.append(torch.tensor(feats, dtype=torch.float32))
+            acoustic_features.append(feats)
             
-            phoneme_ids.append(torch.tensor(get_phoneme_id(p["phoneme"]), dtype=torch.long))
+            phoneme_ids.append(get_phoneme_id(p["phoneme"]))
             
             # Extract targets
-            match_targets.append(torch.tensor(p["regression_target"], dtype=torch.float32))
+            match_targets.append(p["regression_target"])
             
             # For duration target, we can use 100 for LibriTTS or something derived from z-score
             # but for now we just mimic the regression_target (since LibriTTS is perfectly aligned)
-            duration_targets.append(torch.tensor(p["regression_target"], dtype=torch.float32))
+            duration_targets.append(p["regression_target"])
             
             # Presence target (1.0 = present, 0.0 = omitted)
-            presence_targets.append(torch.tensor(1.0 - p["omission_target"], dtype=torch.float32))
+            presence_targets.append(1.0 - p["omission_target"])
             
         return {
-            "acoustic_features": torch.stack(acoustic_features), # (seq_len, 771)
-            "phoneme_ids": torch.stack(phoneme_ids),             # (seq_len,)
-            "match_targets": torch.stack(match_targets),         # (seq_len,)
-            "duration_targets": torch.stack(duration_targets),   # (seq_len,)
-            "presence_targets": torch.stack(presence_targets),   # (seq_len,)
+            "acoustic_features": torch.tensor(acoustic_features, dtype=torch.float32), # (seq_len, 771)
+            "phoneme_ids": torch.tensor(phoneme_ids, dtype=torch.long),             # (seq_len,)
+            "match_targets": torch.tensor(match_targets, dtype=torch.float32),         # (seq_len,)
+            "duration_targets": torch.tensor(duration_targets, dtype=torch.float32),   # (seq_len,)
+            "presence_targets": torch.tensor(presence_targets, dtype=torch.float32),   # (seq_len,)
             "seq_len": len(phonemes)
         }
 

@@ -54,6 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--log-every", type=int, default=100)
+    parser.add_argument("--num-workers", type=int, default=8, help="Number of dataloader workers")
+    parser.add_argument("--prefetch-factor", type=int, default=4, help="Dataloader prefetch factor")
     parser.add_argument("--checkpoint-dir", required=True, help="Where to save model weights")
     return parser
 
@@ -89,7 +91,8 @@ def main():
             dataset,
             batch_size=args.batch_size,
             collate_fn=collate_word_batches,
-            num_workers=2,
+            num_workers=args.num_workers,
+            prefetch_factor=args.prefetch_factor if args.num_workers > 0 else None,
             pin_memory=True
         )
         
@@ -102,12 +105,12 @@ def main():
         start_time = time.time()
         
         for batch in dataloader:
-            acoustics = batch["acoustic_features"].to(device)
-            p_ids = batch["phoneme_ids"].to(device)
-            matches = batch["match_targets"].to(device)
-            durations = batch["duration_targets"].to(device)
-            presences = batch["presence_targets"].to(device)
-            mask = batch["attention_mask"].to(device)
+            acoustics = batch["acoustic_features"].to(device, non_blocking=True)
+            p_ids = batch["phoneme_ids"].to(device, non_blocking=True)
+            matches = batch["match_targets"].to(device, non_blocking=True)
+            durations = batch["duration_targets"].to(device, non_blocking=True)
+            presences = batch["presence_targets"].to(device, non_blocking=True)
+            mask = batch["attention_mask"].to(device, non_blocking=True)
             
             # Apply Self-Supervised Negative Sampling
             acoustics, p_ids, matches, presences = apply_negative_sampling(
