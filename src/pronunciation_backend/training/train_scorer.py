@@ -86,10 +86,10 @@ def main():
     
     for epoch in range(args.epochs):
         print(f"--- Epoch {epoch + 1}/{args.epochs} ---")
-        dataset = WordIterableDataset(jsonl_paths)
+        dataset = WordIterableDataset(jsonl_paths, batch_size=args.batch_size)
         dataloader = DataLoader(
             dataset,
-            batch_size=args.batch_size,
+            batch_size=None, # Batching is handled internally by the dataset to enable bucketing
             collate_fn=collate_word_batches,
             num_workers=args.num_workers,
             prefetch_factor=args.prefetch_factor if args.num_workers > 0 else None,

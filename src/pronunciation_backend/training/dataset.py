@@ -21,11 +21,13 @@ class WordIterableDataset(IterableDataset):
     """
     Streams part-*.jsonl files and groups phonemes by utterance_id (word).
     """
-    def __init__(self, jsonl_paths: list[Path]):
+    def __init__(self, jsonl_paths: list[Path], batch_size: int = 128, bucket_size_multiplier: int = 20):
         super().__init__()
         self.jsonl_paths = jsonl_paths
+        self.batch_size = batch_size
+        self.bucket_size_multiplier = bucket_size_multiplier
         
-    def __iter__(self) -> Iterator[dict]:
+    def __iter__(self) -> Iterator[list[dict]]:
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is None:
             paths_to_process = self.jsonl_paths
@@ -36,6 +38,7 @@ class WordIterableDataset(IterableDataset):
                 if i % worker_info.num_workers == worker_info.id
             ]
             
+        bucket = []
         for path in paths_to_process:
             with path.open('r', encoding='utf-8') as f:
                 current_utterance_id = None
@@ -51,14 +54,27 @@ class WordIterableDataset(IterableDataset):
                         current_utterance_id = utterance_id
                         
                     if utterance_id != current_utterance_id:
-                        yield self._build_tensor_dict(current_phonemes)
+                        bucket.append(self._build_tensor_dict(current_phonemes))
                         current_utterance_id = utterance_id
                         current_phonemes = [row]
+                        
+                        if len(bucket) >= self.batch_size * self.bucket_size_multiplier:
+                            # Sort bucket by seq_len to minimize padding overhead
+                            bucket.sort(key=lambda x: x["seq_len"])
+                            for i in range(0, len(bucket), self.batch_size):
+                                yield bucket[i:i + self.batch_size]
+                            bucket = []
                     else:
                         current_phonemes.append(row)
                         
                 if current_phonemes:
-                    yield self._build_tensor_dict(current_phonemes)
+                    bucket.append(self._build_tensor_dict(current_phonemes))
+                    
+        # Yield any remaining items in the bucket
+        if bucket:
+            bucket.sort(key=lambda x: x["seq_len"])
+            for i in range(0, len(bucket), self.batch_size):
+                yield bucket[i:i + self.batch_size]
 
     def _build_tensor_dict(self, phonemes: list[dict]) -> dict:
         acoustic_features = []
