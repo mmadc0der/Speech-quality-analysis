@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 
 from pronunciation_backend.training.scorer_model import PhonemeScorerModel
 from pronunciation_backend.training.dataset import WordIterableDataset, collate_word_batches
+from pronunciation_backend.training.mmap_dataset import WordMemmapDataset, resolve_mmap_dataset_dir
 
 def apply_negative_sampling(
     acoustic_features: torch.Tensor,
@@ -67,11 +68,14 @@ def main():
     if not features_dir.exists():
         raise FileNotFoundError(f"Features dir not found: {features_dir}")
         
+    mmap_dir = resolve_mmap_dataset_dir(features_dir)
     jsonl_paths = sorted(list(features_dir.glob("part-*.jsonl")))
-    if not jsonl_paths:
-        raise ValueError(f"No part-*.jsonl files found in {features_dir}")
-        
-    print(f"Found {len(jsonl_paths)} feature shard(s).")
+    if mmap_dir is None and not jsonl_paths:
+        raise ValueError(f"No mmap dataset or part-*.jsonl files found in {features_dir}")
+    if mmap_dir is not None:
+        print(f"Using mmap dataset from {mmap_dir}")
+    else:
+        print(f"Found {len(jsonl_paths)} JSONL feature shard(s).")
     
     model = PhonemeScorerModel().to(device)
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=1e-2)
@@ -86,30 +90,43 @@ def main():
     
     for epoch in range(args.epochs):
         print(f"--- Epoch {epoch + 1}/{args.epochs} ---")
-        dataset = WordIterableDataset(jsonl_paths, batch_size=args.batch_size)
-        dataloader = DataLoader(
-            dataset,
-            batch_size=None, # Batching is handled internally by the dataset to enable bucketing
-            collate_fn=collate_word_batches,
-            num_workers=args.num_workers,
-            prefetch_factor=args.prefetch_factor if args.num_workers > 0 else None,
-            pin_memory=True
-        )
+        if mmap_dir is not None:
+            dataset = WordMemmapDataset(mmap_dir)
+            dataloader = DataLoader(
+                dataset,
+                batch_size=args.batch_size,
+                collate_fn=collate_word_batches,
+                num_workers=args.num_workers,
+                prefetch_factor=args.prefetch_factor if args.num_workers > 0 else None,
+                pin_memory=True,
+            )
+        else:
+            dataset = WordIterableDataset(jsonl_paths, batch_size=args.batch_size)
+            dataloader = DataLoader(
+                dataset,
+                batch_size=None, # Batching is handled internally by the dataset to enable bucketing
+                collate_fn=collate_word_batches,
+                num_workers=args.num_workers,
+                prefetch_factor=args.prefetch_factor if args.num_workers > 0 else None,
+                pin_memory=True
+            )
         
         model.train()
         epoch_match_loss = 0.0
         epoch_dur_loss = 0.0
         epoch_pres_loss = 0.0
         steps = 0
+        words_since_log = 0
         
         start_time = time.time()
         
         for batch in dataloader:
-            acoustics = batch["acoustic_features"].to(device, non_blocking=True)
-            p_ids = batch["phoneme_ids"].to(device, non_blocking=True)
-            matches = batch["match_targets"].to(device, non_blocking=True)
-            durations = batch["duration_targets"].to(device, non_blocking=True)
-            presences = batch["presence_targets"].to(device, non_blocking=True)
+            batch_words = int(batch["attention_mask"].size(0))
+            acoustics = batch["acoustic_features"].to(device, dtype=torch.float32, non_blocking=True)
+            p_ids = batch["phoneme_ids"].to(device, dtype=torch.long, non_blocking=True)
+            matches = batch["match_targets"].to(device, dtype=torch.float32, non_blocking=True)
+            durations = batch["duration_targets"].to(device, dtype=torch.float32, non_blocking=True)
+            presences = batch["presence_targets"].to(device, dtype=torch.float32, non_blocking=True)
             mask = batch["attention_mask"].to(device, non_blocking=True)
             
             # Apply Self-Supervised Negative Sampling
@@ -149,6 +166,7 @@ def main():
             epoch_dur_loss += d_loss.item()
             epoch_pres_loss += p_loss.item()
             steps += 1
+            words_since_log += batch_words
             
             if steps % args.log_every == 0:
                 elapsed = time.time() - start_time
@@ -157,9 +175,10 @@ def main():
                     f"Match L: {m_loss.item():.2f} | "
                     f"Dur L: {d_loss.item():.2f} | "
                     f"Pres L: {p_loss.item():.4f} | "
-                    f"{(args.batch_size * args.log_every) / elapsed:.1f} words/s"
+                    f"{words_since_log / elapsed:.1f} words/s"
                 )
                 start_time = time.time()
+                words_since_log = 0
                 
         # Save epoch checkpoint
         ckpt_path = checkpoint_dir / f"scorer_epoch_{epoch + 1}.pt"
