@@ -152,7 +152,8 @@ class WordParquetDataset(Dataset):
     Without preload: opens Parquet metadata only (fast). Rows are read from row groups on demand
     with a small LRU cache — avoids pq.read_table() scanning huge files at init (often stalls on NFS).
 
-    With preload: loads everything into RAM up front (slow init, fastest random access).
+    With preload: memory-maps the full Parquet file as one Arrow table (no per-utterance torch cache;
+    avoids OOM from duplicating the dataset in RAM).
     """
 
     _PARQUET_COLS = (
@@ -178,19 +179,20 @@ class WordParquetDataset(Dataset):
             raise FileNotFoundError(f"Manifest next to parquet not found: {manifest_path}")
         self.manifest = MmapFeatureManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
         self.preload = preload
-        self._rows: list[dict[str, torch.Tensor | int]] | None = None
+        self._table: pa.Table | None = None
         self._pf: pq.ParquetFile | None = None
         self._rg_offsets: list[int] = []
         self._rg_cache: OrderedDict[int, pa.Table] = OrderedDict()
         self._row_group_cache_max = max(1, row_group_cache_max)
 
         if preload:
-            table = pq.read_table(parquet_path, memory_map=False)
-            if table.num_rows != self.manifest.num_utterances:
+            print("Parquet preload: memory-mapping full table (pyarrow)...", flush=True)
+            self._table = pq.read_table(parquet_path, memory_map=True)
+            if self._table.num_rows != self.manifest.num_utterances:
                 raise ValueError(
-                    f"Parquet rows {table.num_rows} != manifest num_utterances {self.manifest.num_utterances}"
+                    f"Parquet rows {self._table.num_rows} != manifest num_utterances {self.manifest.num_utterances}"
                 )
-            self._rows = [_row_dict_from_table(table, i) for i in range(table.num_rows)]
+            print(f"Parquet preload: ready ({self._table.num_rows} utterances).", flush=True)
         else:
             self._pf = pq.ParquetFile(str(parquet_path), memory_map=True)
             off = 0
@@ -222,11 +224,8 @@ class WordParquetDataset(Dataset):
     def __getitem__(self, index: int) -> dict:
         if index < 0 or index >= len(self):
             raise IndexError(index)
-        if self._rows is not None:
-            return {
-                k: v.clone() if isinstance(v, torch.Tensor) else v
-                for k, v in self._rows[index].items()
-            }
+        if self._table is not None:
+            return _row_dict_from_table(self._table, index)
         assert self._pf is not None
         rg = bisect.bisect_right(self._rg_offsets, index) - 1
         if rg < 0:

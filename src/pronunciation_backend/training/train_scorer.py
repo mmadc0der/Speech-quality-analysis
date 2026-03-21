@@ -100,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--parquet-preload",
         action="store_true",
-        help="Load the Parquet split fully into RAM (avoids per-row decode; best with --num-workers 0).",
+        help="Memory-map the full Parquet file as one Arrow table (faster row access than row-group reads; use --num-workers 0 if unsure).",
     )
     return parser
 
@@ -173,7 +173,7 @@ def _build_dataloader(
         jsonl_paths=jsonl_paths,
     )
     if parquet_preload and num_workers > 0:
-        _log("Warning: --parquet-preload with --num-workers > 0 duplicates data in worker processes; use --num-workers 0 if RAM is tight.")
+        _log("Warning: --parquet-preload with --num-workers > 0 can duplicate mmap/worker overhead; prefer --num-workers 0.")
 
     common_kwargs: dict[str, Any] = {
         "num_workers": num_workers,
