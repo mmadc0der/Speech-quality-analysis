@@ -7,6 +7,7 @@ from pathlib import Path
 from pronunciation_backend.training.build_speechocean762_aligned import main as build_speechocean762_aligned_main
 from pronunciation_backend.training.prepare_speechocean762 import main as prepare_speechocean762_main
 from pronunciation_backend.training.schemas import PreparedUtteranceArtifact, TrainingUtteranceArtifact
+from pronunciation_backend.training.speechocean_utils import resolve_speechocean_raw_root
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -73,6 +74,16 @@ def test_prepare_speechocean762_creates_speaker_disjoint_val_split(tmp_path: Pat
     assert {row.speaker_id for row in train_rows} | {row.speaker_id for row in val_rows} == {"spk-a", "spk-b"}
     assert test_rows[0].speaker_id == "spk-c"
     assert train_rows[0].audio_path.startswith("raw/speechocean762/WAVE/")
+
+
+def test_resolve_speechocean_raw_root_finds_deeply_nested_unpacked_root(tmp_path: Path) -> None:
+    dataset_root = tmp_path / "speechocean762"
+    raw_root = dataset_root / "unpacked" / "speechocean762" / "speechocean762"
+    _write_json(raw_root / "scores.json", {})
+    _write_text(raw_root / "train" / "wav.scp", "")
+    _write_text(raw_root / "test" / "wav.scp", "")
+
+    assert resolve_speechocean_raw_root(dataset_root) == raw_root
 
 
 def test_build_speechocean762_aligned_emits_phone_labels_from_scores(tmp_path: Path, monkeypatch) -> None:

@@ -17,6 +17,11 @@ def resolve_speechocean_raw_root(dataset_root: Path) -> Path:
         dataset_root / "raw" / "speechocean762",
         dataset_root / "unpacked" / "speechocean762",
     ]
+    discovered: list[Path] = []
+    if dataset_root.exists():
+        for scores_path in dataset_root.rglob("scores.json"):
+            discovered.append(scores_path.parent)
+    candidates.extend(sorted(discovered, key=lambda path: (len(path.parts), str(path))))
     for candidate in candidates:
         if _looks_like_raw_root(candidate):
             return candidate
