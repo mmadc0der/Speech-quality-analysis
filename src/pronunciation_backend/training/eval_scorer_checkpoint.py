@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -58,6 +57,12 @@ def _safe_mean(values: list[float]) -> float:
     return float(sum(values) / len(values))
 
 
+def _safe_rate(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return float("nan")
+    return numerator / denominator
+
+
 def _pearson(xs: list[float], ys: list[float]) -> float:
     if len(xs) != len(ys) or len(xs) < 2:
         return float("nan")
@@ -68,6 +73,31 @@ def _pearson(xs: list[float], ys: list[float]) -> float:
     if x_std == 0.0 or y_std == 0.0:
         return float("nan")
     return float(np.corrcoef(x, y)[0, 1])
+
+
+def _percentiles(values: list[float]) -> dict[str, float]:
+    if not values:
+        return {}
+    array = np.asarray(values, dtype=np.float64)
+    points = (1, 5, 25, 50, 75, 95, 99)
+    return {f"p{point}": float(np.percentile(array, point)) for point in points}
+
+
+def _bucket_histogram(values: list[float], *, bucket_size: int = 10, upper_bound: int = 100) -> dict[str, int]:
+    if not values:
+        return {}
+    histogram: dict[str, int] = {}
+    capped_upper = max(bucket_size, upper_bound)
+    for start in range(0, capped_upper, bucket_size):
+        end = min(capped_upper - 1, start + bucket_size - 1)
+        label = f"{start:02d}-{end:02d}"
+        histogram[label] = 0
+    for value in values:
+        clipped = max(0.0, min(float(value), capped_upper - 1e-6))
+        start = int(clipped // bucket_size) * bucket_size
+        end = min(capped_upper - 1, start + bucket_size - 1)
+        histogram[f"{start:02d}-{end:02d}"] += 1
+    return histogram
 
 
 def _load_checkpoint(path: Path, *, device: torch.device) -> PhonemeScorerModel:
@@ -174,6 +204,8 @@ def _summarize_predictions(
     presence_correct = sum(int(pred == target) for pred, target in zip(presence_predictions, presence_target))
 
     confusion: dict[str, dict[str, int]] = {true_class: {pred_class: 0 for pred_class in CLASS_ORDER} for true_class in CLASS_ORDER}
+    predicted_class_counts: dict[str, int] = {class_name: 0 for class_name in CLASS_ORDER}
+    target_class_counts: dict[str, int] = {class_name: 0 for class_name in CLASS_ORDER}
     true_class_stats: dict[str, dict[str, list[float] | int]] = {
         class_name: {
             "count": 0,
@@ -185,6 +217,7 @@ def _summarize_predictions(
     }
     omitted_presence_probs: list[float] = []
     present_presence_probs: list[float] = []
+    high_score_error_counts: dict[str, int] = {class_name: 0 for class_name in CLASS_ORDER}
 
     for pred_match, pred_duration, pred_presence, target_match, target_presence in zip(
         match_pred,
@@ -196,12 +229,16 @@ def _summarize_predictions(
         true_class = _class_from_regression_target(target_match)
         pred_class = _predicted_class(pred_match, pred_presence)
         confusion[true_class][pred_class] += 1
+        predicted_class_counts[pred_class] += 1
+        target_class_counts[true_class] += 1
 
         stats = true_class_stats[true_class]
         stats["count"] = int(stats["count"]) + 1
         stats["match_scores"].append(pred_match)  # type: ignore[union-attr]
         stats["duration_scores"].append(pred_duration)  # type: ignore[union-attr]
         stats["presence_probs"].append(pred_presence)  # type: ignore[union-attr]
+        if pred_match >= CORRECT_THRESHOLD:
+            high_score_error_counts[true_class] += 1
 
         if target_presence < 0.5:
             omitted_presence_probs.append(pred_presence)
@@ -210,11 +247,21 @@ def _summarize_predictions(
 
     summarized_class_stats: dict[str, dict[str, float | int]] = {}
     for class_name, stats in true_class_stats.items():
+        count = int(stats["count"])
+        match_scores = stats["match_scores"]  # type: ignore[assignment]
+        duration_scores = stats["duration_scores"]  # type: ignore[assignment]
+        presence_probs = stats["presence_probs"]  # type: ignore[assignment]
         summarized_class_stats[class_name] = {
-            "count": int(stats["count"]),
-            "mean_match_score": _safe_mean(stats["match_scores"]),  # type: ignore[arg-type]
-            "mean_duration_score": _safe_mean(stats["duration_scores"]),  # type: ignore[arg-type]
-            "mean_presence_prob": _safe_mean(stats["presence_probs"]),  # type: ignore[arg-type]
+            "count": count,
+            "mean_match_score": _safe_mean(match_scores),
+            "mean_duration_score": _safe_mean(duration_scores),
+            "mean_presence_prob": _safe_mean(presence_probs),
+            "match_percentiles": _percentiles(match_scores),
+            "duration_percentiles": _percentiles(duration_scores),
+            "presence_percentiles": _percentiles(presence_probs),
+            "match_histogram_10pt": _bucket_histogram(match_scores),
+            "predicted_correct_rate": _safe_rate(confusion[class_name]["correct"], count),
+            "high_match_score_rate_gte_correct_threshold": _safe_rate(high_score_error_counts[class_name], count),
         }
 
     confusion_rates: dict[str, dict[str, float]] = {}
@@ -224,6 +271,61 @@ def _summarize_predictions(
             pred_class: row[pred_class] / row_total
             for pred_class in CLASS_ORDER
         }
+
+    predicted_class_rates = {
+        class_name: predicted_class_counts[class_name] / total_phones
+        for class_name in CLASS_ORDER
+    }
+    target_class_rates = {
+        class_name: target_class_counts[class_name] / total_phones
+        for class_name in CLASS_ORDER
+    }
+
+    mean_match_by_class = {
+        class_name: float(summarized_class_stats[class_name]["mean_match_score"])
+        for class_name in CLASS_ORDER
+    }
+    separation = {
+        "correct_minus_accented": mean_match_by_class["correct"] - mean_match_by_class["accented"],
+        "accented_minus_wrong_or_missed": mean_match_by_class["accented"] - mean_match_by_class["wrong_or_missed"],
+        "correct_minus_wrong_or_missed": mean_match_by_class["correct"] - mean_match_by_class["wrong_or_missed"],
+    }
+
+    diagnostics: dict[str, object] = {
+        "target_class_counts": target_class_counts,
+        "target_class_rates": target_class_rates,
+        "predicted_class_counts": predicted_class_counts,
+        "predicted_class_rates": predicted_class_rates,
+        "present_phone_count": len(present_presence_probs),
+        "omitted_phone_count": len(omitted_presence_probs),
+        "mean_match_separation": separation,
+        "degenerate_all_correct_predictions": predicted_class_counts["correct"] == total_phones,
+        "weak_rank_correlation": _pearson(match_pred, match_target) < 0.3,
+        "collapsed_match_separation": separation["correct_minus_wrong_or_missed"] < 5.0,
+        "presence_metric_not_informative": len(omitted_presence_probs) == 0,
+    }
+
+    interpretation: list[str] = []
+    if diagnostics["degenerate_all_correct_predictions"]:
+        interpretation.append(
+            "The checkpoint predicts every phone as 'correct'; confusion is fully collapsed into one class."
+        )
+    if diagnostics["collapsed_match_separation"]:
+        interpretation.append(
+            "Mean match scores for true classes are nearly identical, so the model is not separating good and bad phones."
+        )
+    if diagnostics["weak_rank_correlation"]:
+        interpretation.append(
+            "Match-score correlation with mapped human targets is weak, indicating poor ranking quality on this split."
+        )
+    if diagnostics["presence_metric_not_informative"]:
+        interpretation.append(
+            "Presence accuracy is not informative here because the evaluated split contains no omitted-phone positives."
+        )
+    if not interpretation:
+        interpretation.append(
+            "No obvious collapse pattern detected from the aggregate diagnostics; inspect confusion, percentiles, and sample errors next."
+        )
 
     return {
         "phones": total_phones,
@@ -238,6 +340,8 @@ def _summarize_predictions(
         "true_class_stats": summarized_class_stats,
         "class_confusion_counts": confusion,
         "class_confusion_rates": confusion_rates,
+        "diagnostics": diagnostics,
+        "interpretation": interpretation,
         "notes": {
             "class_thresholds": {
                 "wrong_or_missed_lt": ACCENTED_THRESHOLD,

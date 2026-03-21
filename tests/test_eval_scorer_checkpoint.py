@@ -36,3 +36,23 @@ def test_summarize_predictions_reports_expected_confusion() -> None:
     assert summary["class_confusion_counts"]["accented"]["accented"] == 1
     assert summary["class_confusion_counts"]["wrong_or_missed"]["wrong_or_missed"] == 2
     assert summary["true_class_stats"]["correct"]["mean_match_score"] == 90.0
+    assert summary["diagnostics"]["predicted_class_counts"]["correct"] == 1
+    assert summary["diagnostics"]["target_class_counts"]["wrong_or_missed"] == 2
+    assert summary["true_class_stats"]["correct"]["match_percentiles"]["p50"] == 90.0
+    assert "degenerate_all_correct_predictions" in summary["diagnostics"]
+
+
+def test_summarize_predictions_flags_collapse_when_everything_is_correct() -> None:
+    summary = _summarize_predictions(
+        match_pred=[93.0, 93.2, 93.1],
+        duration_pred=[94.0, 94.0, 94.0],
+        presence_prob=[0.99, 0.99, 0.99],
+        match_target=[92.0, 60.0, 15.0],
+        duration_target=[92.0, 60.0, 15.0],
+        presence_target=[1.0, 1.0, 1.0],
+    )
+
+    assert summary["diagnostics"]["degenerate_all_correct_predictions"] is True
+    assert summary["diagnostics"]["collapsed_match_separation"] is True
+    assert summary["diagnostics"]["presence_metric_not_informative"] is True
+    assert any("predicts every phone as 'correct'" in message for message in summary["interpretation"])
