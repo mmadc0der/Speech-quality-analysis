@@ -10,7 +10,11 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 
 from pronunciation_backend.training.dataset import WordIterableDataset, collate_word_batches
-from pronunciation_backend.training.mmap_dataset import WordMemmapDataset, resolve_mmap_dataset_dir
+from pronunciation_backend.training.mmap_dataset import (
+    BlockShuffleBatchSampler,
+    WordMemmapDataset,
+    resolve_mmap_dataset_dir,
+)
 from pronunciation_backend.training.scorer_model import PhonemeScorerModel
 
 def apply_negative_sampling(
@@ -65,6 +69,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--negative-sampling-prob", type=float, default=0.15, help="Probability of synthetic corruption during training.")
     parser.add_argument("--train-seed", type=int, default=1337, help="Base seed for train-time sampling and shuffling.")
     parser.add_argument("--val-seed", type=int, default=7331, help="Fixed seed for validation-time negative sampling.")
+    parser.add_argument(
+        "--train-shuffle-mode",
+        choices=["none", "block"],
+        default="block",
+        help="Shuffle strategy for mmap-backed training data.",
+    )
+    parser.add_argument(
+        "--shuffle-block-words",
+        type=int,
+        default=16_384,
+        help="Number of contiguous words to read before shuffling locally inside a block.",
+    )
     return parser
 
 
@@ -93,8 +109,10 @@ def _build_dataloader(
     num_workers: int,
     prefetch_factor: int,
     split_name: str,
-    shuffle: bool,
-) -> DataLoader:
+    shuffle_mode: str,
+    sampler_seed: int,
+    shuffle_block_words: int,
+) -> tuple[DataLoader, BlockShuffleBatchSampler | None]:
     mmap_dir, jsonl_paths = _resolve_split(features_dir, split_name=split_name)
     _describe_split(features_dir, split_name=split_name, mmap_dir=mmap_dir, jsonl_paths=jsonl_paths)
 
@@ -102,25 +120,49 @@ def _build_dataloader(
         "num_workers": num_workers,
         "prefetch_factor": prefetch_factor if num_workers > 0 else None,
         "pin_memory": True,
+        "persistent_workers": num_workers > 0,
     }
     if mmap_dir is not None:
         dataset = WordMemmapDataset(mmap_dir)
-        return DataLoader(
-            dataset,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            collate_fn=collate_word_batches,
-            **common_kwargs,
+        if shuffle_mode == "block":
+            batch_sampler = BlockShuffleBatchSampler(
+                len(dataset),
+                batch_size=batch_size,
+                block_words=shuffle_block_words,
+                seed=sampler_seed,
+            )
+            return (
+                DataLoader(
+                    dataset,
+                    batch_sampler=batch_sampler,
+                    collate_fn=collate_word_batches,
+                    **common_kwargs,
+                ),
+                batch_sampler,
+            )
+
+        return (
+            DataLoader(
+                dataset,
+                batch_size=batch_size,
+                shuffle=False,
+                collate_fn=collate_word_batches,
+                **common_kwargs,
+            ),
+            None,
         )
 
     dataset = WordIterableDataset(jsonl_paths, batch_size=batch_size)
-    if shuffle:
-        print(f"{split_name}: shuffle disabled because JSONL streaming uses IterableDataset.")
-    return DataLoader(
-        dataset,
-        batch_size=None,
-        collate_fn=collate_word_batches,
-        **common_kwargs,
+    if shuffle_mode != "none":
+        print(f"{split_name}: block shuffle is disabled because JSONL streaming uses IterableDataset.")
+    return (
+        DataLoader(
+            dataset,
+            batch_size=None,
+            collate_fn=collate_word_batches,
+            **common_kwargs,
+        ),
+        None,
     )
 
 
@@ -302,23 +344,27 @@ def main():
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    train_loader = _build_dataloader(
+    train_loader, train_batch_sampler = _build_dataloader(
         features_dir=train_features_dir,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         prefetch_factor=args.prefetch_factor,
         split_name="train",
-        shuffle=True,
+        shuffle_mode=args.train_shuffle_mode,
+        sampler_seed=args.train_seed,
+        shuffle_block_words=args.shuffle_block_words,
     )
     val_batches = None
     if val_features_dir is not None:
-        val_loader = _build_dataloader(
+        val_loader, _ = _build_dataloader(
             features_dir=val_features_dir,
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             prefetch_factor=args.prefetch_factor,
             split_name="val",
-            shuffle=False,
+            shuffle_mode="none",
+            sampler_seed=args.val_seed,
+            shuffle_block_words=args.shuffle_block_words,
         )
         val_batches = _cache_batches(val_loader, split_name="val")
 
@@ -326,6 +372,8 @@ def main():
 
     for epoch in range(args.epochs):
         print(f"--- Epoch {epoch + 1}/{args.epochs} ---")
+        if train_batch_sampler is not None:
+            train_batch_sampler.set_epoch(epoch)
         train_metrics = _run_epoch(
             model=model,
             batches=train_loader,

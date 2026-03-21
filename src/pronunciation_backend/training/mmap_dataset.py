@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import math
+import random
 from pathlib import Path
 from typing import Literal
 
 import numpy as np
 import torch
 from pydantic import BaseModel, Field
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Sampler
 
 from pronunciation_backend.training.dataset import get_phoneme_id
 
@@ -251,3 +253,73 @@ class WordMemmapDataset(Dataset):
             "presence_targets": torch.from_numpy(np.array(self._presence_targets[start:end], copy=True)),
             "seq_len": end - start,
         }
+
+
+class BlockShuffleBatchSampler(Sampler[list[int]]):
+    """
+    Keeps disk access roughly sequential by traversing contiguous index blocks,
+    while shuffling sample order inside each block.
+    """
+
+    def __init__(
+        self,
+        dataset_size: int,
+        *,
+        batch_size: int,
+        block_words: int,
+        seed: int,
+        drop_last: bool = False,
+        shuffle_blocks: bool = True,
+    ) -> None:
+        if dataset_size <= 0:
+            raise ValueError("dataset_size must be positive")
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        if block_words <= 0:
+            raise ValueError("block_words must be positive")
+
+        self.dataset_size = dataset_size
+        self.batch_size = batch_size
+        self.block_words = max(batch_size, block_words)
+        self.seed = seed
+        self.drop_last = drop_last
+        self.shuffle_blocks = shuffle_blocks
+        self.epoch = 0
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
+
+    def __len__(self) -> int:
+        total = 0
+        for start in range(0, self.dataset_size, self.block_words):
+            block_size = min(self.block_words, self.dataset_size - start)
+            if self.drop_last:
+                total += block_size // self.batch_size
+            else:
+                total += math.ceil(block_size / self.batch_size)
+        return total
+
+    def __iter__(self):
+        rng = random.Random(self.seed + self.epoch)
+        blocks: list[tuple[int, int]] = []
+        for start in range(0, self.dataset_size, self.block_words):
+            end = min(start + self.block_words, self.dataset_size)
+            blocks.append((start, end))
+
+        if self.shuffle_blocks:
+            rng.shuffle(blocks)
+
+        pending_batch: list[int] = []
+        for start, end in blocks:
+            block_indices = list(range(start, end))
+            rng.shuffle(block_indices)
+            for index in block_indices:
+                pending_batch.append(index)
+                if len(pending_batch) == self.batch_size:
+                    yield pending_batch
+                    pending_batch = []
+            if pending_batch and not self.drop_last:
+                yield pending_batch
+                pending_batch = []
+            elif pending_batch and self.drop_last:
+                pending_batch = []

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pronunciation_backend.training.dataset import collate_word_batches
 from pronunciation_backend.training.mmap_dataset import (
+    BlockShuffleBatchSampler,
     WordMemmapDataset,
     pack_jsonl_split_to_mmap,
     resolve_mmap_dataset_dir,
@@ -74,3 +75,30 @@ def test_pack_and_load_mmap_dataset(tmp_path: Path) -> None:
     assert batch["acoustic_features"].shape == (2, 2, 771)
     assert batch["phoneme_ids"].shape == (2, 2)
     assert batch["attention_mask"].tolist() == [[True, True], [True, False]]
+
+
+def test_block_shuffle_batch_sampler_is_local_and_deterministic() -> None:
+    sampler = BlockShuffleBatchSampler(
+        dataset_size=10,
+        batch_size=2,
+        block_words=4,
+        seed=42,
+    )
+    sampler.set_epoch(0)
+    batches = list(iter(sampler))
+
+    flat = [index for batch in batches for index in batch]
+    assert sorted(flat) == list(range(10))
+    assert all(abs(a - b) < 4 for batch in batches for a in batch for b in batch)
+
+    sampler_again = BlockShuffleBatchSampler(
+        dataset_size=10,
+        batch_size=2,
+        block_words=4,
+        seed=42,
+    )
+    sampler_again.set_epoch(0)
+    assert batches == list(iter(sampler_again))
+
+    sampler_again.set_epoch(1)
+    assert batches != list(iter(sampler_again))
