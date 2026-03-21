@@ -4,6 +4,7 @@ from pronunciation_backend.training.pretrain_acoustic_encoder_v2 import (
     AcousticEncoderPretrainModel,
     _masked_reconstruction_loss,
     _partition_muon_param_groups,
+    _prepare_single_process_dist_env,
 )
 
 
@@ -58,3 +59,16 @@ def test_masked_reconstruction_loss_uses_only_masked_positions() -> None:
     )
 
     assert loss.item() == 36.0
+
+
+def test_prepare_single_process_dist_env_sets_required_keys(monkeypatch) -> None:
+    for key in ("MASTER_ADDR", "MASTER_PORT", "RANK", "WORLD_SIZE", "LOCAL_RANK"):
+        monkeypatch.delenv(key, raising=False)
+
+    env_updates = _prepare_single_process_dist_env()
+
+    assert env_updates["MASTER_ADDR"] == "127.0.0.1"
+    assert int(env_updates["MASTER_PORT"]) > 0
+    assert env_updates["RANK"] == "0"
+    assert env_updates["WORLD_SIZE"] == "1"
+    assert env_updates["LOCAL_RANK"] == "0"

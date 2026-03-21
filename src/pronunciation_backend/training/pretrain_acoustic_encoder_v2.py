@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import builtins
+import os
+import socket
 import time
 from collections.abc import Iterable
 from pathlib import Path
@@ -100,14 +102,49 @@ def _partition_muon_param_groups(model: AcousticEncoderPretrainModel) -> list[di
     ]
 
 
+def _reserve_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _prepare_single_process_dist_env() -> dict[str, str]:
+    env_updates: dict[str, str] = {}
+    if not os.environ.get("MASTER_ADDR"):
+        env_updates["MASTER_ADDR"] = "127.0.0.1"
+    if not os.environ.get("MASTER_PORT"):
+        env_updates["MASTER_PORT"] = str(_reserve_free_port())
+    if not os.environ.get("RANK"):
+        env_updates["RANK"] = "0"
+    if not os.environ.get("WORLD_SIZE"):
+        env_updates["WORLD_SIZE"] = "1"
+    if not os.environ.get("LOCAL_RANK"):
+        env_updates["LOCAL_RANK"] = "0"
+    os.environ.update(env_updates)
+    return env_updates
+
+
+def _maybe_init_distributed_for_muon(device: torch.device) -> bool:
+    if not torch.distributed.is_available():
+        raise RuntimeError("torch.distributed is unavailable, but Muon requires it.")
+    if torch.distributed.is_initialized():
+        return False
+
+    _prepare_single_process_dist_env()
+    backend = "nccl" if device.type == "cuda" else "gloo"
+    torch.distributed.init_process_group(backend=backend, init_method="env://")
+    return True
+
+
 def _build_optimizer(
     model: AcousticEncoderPretrainModel,
     *,
+    device: torch.device,
     muon_lr: float,
     aux_lr: float,
     weight_decay: float,
     betas: tuple[float, float],
-):
+) -> tuple[object, bool]:
     try:
         from muon import MuonWithAuxAdam
     except ModuleNotFoundError as exc:  # pragma: no cover - depends on optional install
@@ -116,13 +153,14 @@ def _build_optimizer(
             "`pip install git+https://github.com/KellerJordan/Muon`."
         ) from exc
 
+    initialized_dist = _maybe_init_distributed_for_muon(device)
     param_groups = _partition_muon_param_groups(model)
     param_groups[0]["lr"] = muon_lr
     param_groups[0]["weight_decay"] = weight_decay
     param_groups[1]["lr"] = aux_lr
     param_groups[1]["betas"] = betas
     param_groups[1]["weight_decay"] = weight_decay
-    return MuonWithAuxAdam(param_groups)
+    return MuonWithAuxAdam(param_groups), initialized_dist
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -489,8 +527,9 @@ def main() -> int:
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     model = AcousticEncoderPretrainModel(dropout=args.dropout).to(device)
-    optimizer = _build_optimizer(
+    optimizer, initialized_dist_for_muon = _build_optimizer(
         model,
+        device=device,
         muon_lr=args.muon_lr,
         aux_lr=args.aux_lr,
         weight_decay=args.weight_decay,
@@ -527,72 +566,59 @@ def main() -> int:
         val_batches = _cache_batches(val_loader, split_name="val")
 
     best_val_loss = float("inf")
-    for epoch in range(args.epochs):
-        _log(f"--- Epoch {epoch + 1}/{args.epochs} ---")
-        if train_batch_sampler is not None:
-            train_batch_sampler.set_epoch(epoch)
+    try:
+        for epoch in range(args.epochs):
+            _log(f"--- Epoch {epoch + 1}/{args.epochs} ---")
+            if train_batch_sampler is not None:
+                train_batch_sampler.set_epoch(epoch)
 
-        train_metrics = _run_epoch(
-            model=model,
-            batches=train_loader,
-            device=device,
-            optimizer=optimizer,
-            log_every=args.log_every,
-            phase="train",
-            mask_ratio=args.mask_ratio,
-            mask_block_size=args.mask_block_size,
-            min_masks=args.min_masks,
-            rng_seed=args.train_seed + epoch,
-            max_batches=args.max_batches,
-        )
-        _log(
-            f"Train Summary | Epoch {epoch + 1} | "
-            f"Steps: {int(train_metrics['steps'])} | "
-            f"Words: {int(train_metrics['words'])} | "
-            f"Masked tokens: {int(train_metrics['masked_tokens'])} | "
-            f"Recon: {train_metrics['reconstruction_loss']:.6f}"
-        )
-
-        val_metrics = None
-        if val_batches is not None:
-            val_metrics = _run_epoch(
+            train_metrics = _run_epoch(
                 model=model,
-                batches=val_batches,
+                batches=train_loader,
                 device=device,
-                optimizer=None,
+                optimizer=optimizer,
                 log_every=args.log_every,
-                phase="val",
+                phase="train",
                 mask_ratio=args.mask_ratio,
                 mask_block_size=args.mask_block_size,
                 min_masks=args.min_masks,
-                rng_seed=args.val_seed,
+                rng_seed=args.train_seed + epoch,
                 max_batches=args.max_batches,
             )
             _log(
-                f"Val Summary   | Epoch {epoch + 1} | "
-                f"Steps: {int(val_metrics['steps'])} | "
-                f"Words: {int(val_metrics['words'])} | "
-                f"Masked tokens: {int(val_metrics['masked_tokens'])} | "
-                f"Recon: {val_metrics['reconstruction_loss']:.6f}"
+                f"Train Summary | Epoch {epoch + 1} | "
+                f"Steps: {int(train_metrics['steps'])} | "
+                f"Words: {int(train_metrics['words'])} | "
+                f"Masked tokens: {int(train_metrics['masked_tokens'])} | "
+                f"Recon: {train_metrics['reconstruction_loss']:.6f}"
             )
 
-        epoch_ckpt_path = checkpoint_dir / f"acoustic_encoder_v2_epoch_{epoch + 1}.pt"
-        _save_checkpoint(
-            epoch_ckpt_path,
-            epoch=epoch + 1,
-            model=model,
-            optimizer=optimizer,
-            train_metrics=train_metrics,
-            val_metrics=val_metrics,
-            args=args,
-        )
-        _log(f"Saved checkpoint to {epoch_ckpt_path}")
+            val_metrics = None
+            if val_batches is not None:
+                val_metrics = _run_epoch(
+                    model=model,
+                    batches=val_batches,
+                    device=device,
+                    optimizer=None,
+                    log_every=args.log_every,
+                    phase="val",
+                    mask_ratio=args.mask_ratio,
+                    mask_block_size=args.mask_block_size,
+                    min_masks=args.min_masks,
+                    rng_seed=args.val_seed,
+                    max_batches=args.max_batches,
+                )
+                _log(
+                    f"Val Summary   | Epoch {epoch + 1} | "
+                    f"Steps: {int(val_metrics['steps'])} | "
+                    f"Words: {int(val_metrics['words'])} | "
+                    f"Masked tokens: {int(val_metrics['masked_tokens'])} | "
+                    f"Recon: {val_metrics['reconstruction_loss']:.6f}"
+                )
 
-        if val_metrics is not None and val_metrics["reconstruction_loss"] < best_val_loss:
-            best_val_loss = val_metrics["reconstruction_loss"]
-            best_ckpt_path = checkpoint_dir / "acoustic_encoder_v2_best.pt"
+            epoch_ckpt_path = checkpoint_dir / f"acoustic_encoder_v2_epoch_{epoch + 1}.pt"
             _save_checkpoint(
-                best_ckpt_path,
+                epoch_ckpt_path,
                 epoch=epoch + 1,
                 model=model,
                 optimizer=optimizer,
@@ -600,10 +626,27 @@ def main() -> int:
                 val_metrics=val_metrics,
                 args=args,
             )
-            _log(
-                f"New best validation checkpoint saved to {best_ckpt_path} "
-                f"(reconstruction_loss={best_val_loss:.6f})"
-            )
+            _log(f"Saved checkpoint to {epoch_ckpt_path}")
+
+            if val_metrics is not None and val_metrics["reconstruction_loss"] < best_val_loss:
+                best_val_loss = val_metrics["reconstruction_loss"]
+                best_ckpt_path = checkpoint_dir / "acoustic_encoder_v2_best.pt"
+                _save_checkpoint(
+                    best_ckpt_path,
+                    epoch=epoch + 1,
+                    model=model,
+                    optimizer=optimizer,
+                    train_metrics=train_metrics,
+                    val_metrics=val_metrics,
+                    args=args,
+                )
+                _log(
+                    f"New best validation checkpoint saved to {best_ckpt_path} "
+                    f"(reconstruction_loss={best_val_loss:.6f})"
+                )
+    finally:
+        if initialized_dist_for_muon and torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
 
     return 0
 
