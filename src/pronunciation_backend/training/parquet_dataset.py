@@ -237,14 +237,19 @@ class WordParquetDataset(Dataset):
 
 def _row_dict_from_table(table: pa.Table, index: int) -> dict[str, torch.Tensor | int]:
     seq_len = int(table["seq_len"][index].as_py())
-    ac_flat = table["acoustic_flat"][index].as_py()
+    
+    # Extract underlying data as numpy arrays (avoids slow .as_py() python list conversions)
+    ac_flat = table["acoustic_flat"][index].values.to_numpy(zero_copy_only=False)
     if len(ac_flat) != seq_len * ACOUSTIC_FEATURE_DIM:
         raise ValueError(f"Row {index}: acoustic_flat length mismatch")
+    
+    # torch.tensor(numpy_array) is fast and avoids read-only warnings
     acoustic_features = torch.tensor(ac_flat, dtype=torch.float32).view(seq_len, ACOUSTIC_FEATURE_DIM)
-    phoneme_ids = torch.tensor(table["phoneme_ids"][index].as_py(), dtype=torch.long)
-    match_targets = torch.tensor(table["match_targets"][index].as_py(), dtype=torch.float32)
-    duration_targets = torch.tensor(table["duration_targets"][index].as_py(), dtype=torch.float32)
-    presence_targets = torch.tensor(table["presence_targets"][index].as_py(), dtype=torch.float32)
+    phoneme_ids = torch.tensor(table["phoneme_ids"][index].values.to_numpy(zero_copy_only=False), dtype=torch.long)
+    match_targets = torch.tensor(table["match_targets"][index].values.to_numpy(zero_copy_only=False), dtype=torch.float32)
+    duration_targets = torch.tensor(table["duration_targets"][index].values.to_numpy(zero_copy_only=False), dtype=torch.float32)
+    presence_targets = torch.tensor(table["presence_targets"][index].values.to_numpy(zero_copy_only=False), dtype=torch.float32)
+    
     return {
         "acoustic_features": acoustic_features,
         "phoneme_ids": phoneme_ids,
