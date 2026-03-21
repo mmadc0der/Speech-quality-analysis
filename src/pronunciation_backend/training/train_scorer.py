@@ -1,15 +1,16 @@
 import argparse
 import time
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 
-from pronunciation_backend.training.scorer_model import PhonemeScorerModel
 from pronunciation_backend.training.dataset import WordIterableDataset, collate_word_batches
 from pronunciation_backend.training.mmap_dataset import WordMemmapDataset, resolve_mmap_dataset_dir
+from pronunciation_backend.training.scorer_model import PhonemeScorerModel
 
 def apply_negative_sampling(
     acoustic_features: torch.Tensor,
@@ -50,6 +51,7 @@ def apply_negative_sampling(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--features-dir", required=True, help="Path to the feature store split (e.g. /cold/.../splits/train)")
+    parser.add_argument("--val-features-dir", help="Optional validation feature split. When set, validation runs after every epoch.")
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=3e-4)
@@ -58,120 +60,162 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num-workers", type=int, default=8, help="Number of dataloader workers")
     parser.add_argument("--prefetch-factor", type=int, default=4, help="Dataloader prefetch factor")
     parser.add_argument("--checkpoint-dir", required=True, help="Where to save model weights")
+    parser.add_argument("--negative-sampling-prob", type=float, default=0.15, help="Probability of synthetic corruption during training.")
     return parser
 
-def main():
-    args = build_parser().parse_args()
-    device = torch.device(args.device)
-    
-    features_dir = Path(args.features_dir)
+
+def _resolve_split(features_dir: Path, *, split_name: str) -> tuple[Path | None, list[Path]]:
     if not features_dir.exists():
-        raise FileNotFoundError(f"Features dir not found: {features_dir}")
-        
+        raise FileNotFoundError(f"{split_name} features dir not found: {features_dir}")
+
     mmap_dir = resolve_mmap_dataset_dir(features_dir)
     jsonl_paths = sorted(list(features_dir.glob("part-*.jsonl")))
     if mmap_dir is None and not jsonl_paths:
         raise ValueError(f"No mmap dataset or part-*.jsonl files found in {features_dir}")
+    return mmap_dir, jsonl_paths
+
+
+def _describe_split(features_dir: Path, *, split_name: str, mmap_dir: Path | None, jsonl_paths: list[Path]) -> None:
     if mmap_dir is not None:
-        print(f"Using mmap dataset from {mmap_dir}")
+        print(f"{split_name}: using mmap dataset from {mmap_dir}")
     else:
-        print(f"Found {len(jsonl_paths)} JSONL feature shard(s).")
-    
-    model = PhonemeScorerModel().to(device)
-    optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=1e-2)
-    
-    # Loss functions
-    # Using Smooth L1 (Huber) for regression is more robust to outliers than MSE
-    reg_loss_fn = nn.SmoothL1Loss(reduction='none') 
-    bce_loss_fn = nn.BCEWithLogitsLoss(reduction='none')
-    
-    checkpoint_dir = Path(args.checkpoint_dir)
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    
-    for epoch in range(args.epochs):
-        print(f"--- Epoch {epoch + 1}/{args.epochs} ---")
-        if mmap_dir is not None:
-            dataset = WordMemmapDataset(mmap_dir)
-            dataloader = DataLoader(
-                dataset,
-                batch_size=args.batch_size,
-                collate_fn=collate_word_batches,
-                num_workers=args.num_workers,
-                prefetch_factor=args.prefetch_factor if args.num_workers > 0 else None,
-                pin_memory=True,
-            )
-        else:
-            dataset = WordIterableDataset(jsonl_paths, batch_size=args.batch_size)
-            dataloader = DataLoader(
-                dataset,
-                batch_size=None, # Batching is handled internally by the dataset to enable bucketing
-                collate_fn=collate_word_batches,
-                num_workers=args.num_workers,
-                prefetch_factor=args.prefetch_factor if args.num_workers > 0 else None,
-                pin_memory=True
-            )
-        
+        print(f"{split_name}: found {len(jsonl_paths)} JSONL feature shard(s) in {features_dir}")
+
+
+def _build_dataloader(
+    *,
+    features_dir: Path,
+    batch_size: int,
+    num_workers: int,
+    prefetch_factor: int,
+    split_name: str,
+    shuffle: bool,
+) -> DataLoader:
+    mmap_dir, jsonl_paths = _resolve_split(features_dir, split_name=split_name)
+    _describe_split(features_dir, split_name=split_name, mmap_dir=mmap_dir, jsonl_paths=jsonl_paths)
+
+    common_kwargs: dict[str, Any] = {
+        "num_workers": num_workers,
+        "prefetch_factor": prefetch_factor if num_workers > 0 else None,
+        "pin_memory": True,
+    }
+    if mmap_dir is not None:
+        dataset = WordMemmapDataset(mmap_dir)
+        return DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            collate_fn=collate_word_batches,
+            **common_kwargs,
+        )
+
+    dataset = WordIterableDataset(jsonl_paths, batch_size=batch_size)
+    if shuffle:
+        print(f"{split_name}: shuffle disabled because JSONL streaming uses IterableDataset.")
+    return DataLoader(
+        dataset,
+        batch_size=None,
+        collate_fn=collate_word_batches,
+        **common_kwargs,
+    )
+
+
+def _move_batch_to_device(batch: dict[str, torch.Tensor], device: torch.device) -> dict[str, torch.Tensor]:
+    return {
+        "acoustic_features": batch["acoustic_features"].to(device, dtype=torch.float32, non_blocking=True),
+        "phoneme_ids": batch["phoneme_ids"].to(device, dtype=torch.long, non_blocking=True),
+        "match_targets": batch["match_targets"].to(device, dtype=torch.float32, non_blocking=True),
+        "duration_targets": batch["duration_targets"].to(device, dtype=torch.float32, non_blocking=True),
+        "presence_targets": batch["presence_targets"].to(device, dtype=torch.float32, non_blocking=True),
+        "attention_mask": batch["attention_mask"].to(device, non_blocking=True),
+    }
+
+
+def _masked_mean(loss_tensor: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    return (loss_tensor * mask).sum() / max(1, mask.sum())
+
+
+def _run_epoch(
+    *,
+    model: PhonemeScorerModel,
+    dataloader: DataLoader,
+    device: torch.device,
+    reg_loss_fn: nn.Module,
+    bce_loss_fn: nn.Module,
+    optimizer: AdamW | None,
+    log_every: int,
+    phase: str,
+    negative_sampling_prob: float,
+) -> dict[str, float]:
+    training = optimizer is not None
+    if training:
         model.train()
-        epoch_match_loss = 0.0
-        epoch_dur_loss = 0.0
-        epoch_pres_loss = 0.0
-        steps = 0
-        words_since_log = 0
-        
-        start_time = time.time()
-        
+    else:
+        model.eval()
+
+    total_match_loss = 0.0
+    total_dur_loss = 0.0
+    total_pres_loss = 0.0
+    total_loss = 0.0
+    total_steps = 0
+    total_words = 0
+    words_since_log = 0
+    start_time = time.time()
+
+    grad_context = torch.enable_grad() if training else torch.no_grad()
+    with grad_context:
         for batch in dataloader:
             batch_words = int(batch["attention_mask"].size(0))
-            acoustics = batch["acoustic_features"].to(device, dtype=torch.float32, non_blocking=True)
-            p_ids = batch["phoneme_ids"].to(device, dtype=torch.long, non_blocking=True)
-            matches = batch["match_targets"].to(device, dtype=torch.float32, non_blocking=True)
-            durations = batch["duration_targets"].to(device, dtype=torch.float32, non_blocking=True)
-            presences = batch["presence_targets"].to(device, dtype=torch.float32, non_blocking=True)
-            mask = batch["attention_mask"].to(device, non_blocking=True)
-            
-            # Apply Self-Supervised Negative Sampling
-            acoustics, p_ids, matches, presences = apply_negative_sampling(
-                acoustics, p_ids, matches, presences, mask, prob=0.15
-            )
-            
-            optimizer.zero_grad()
-            
+            total_words += batch_words
+            words_since_log += batch_words
+
+            moved = _move_batch_to_device(batch, device)
+            acoustics = moved["acoustic_features"]
+            p_ids = moved["phoneme_ids"]
+            matches = moved["match_targets"]
+            durations = moved["duration_targets"]
+            presences = moved["presence_targets"]
+            mask = moved["attention_mask"]
+
+            if training and negative_sampling_prob > 0:
+                acoustics, p_ids, matches, presences = apply_negative_sampling(
+                    acoustics,
+                    p_ids,
+                    matches,
+                    presences,
+                    mask,
+                    prob=negative_sampling_prob,
+                )
+
+            if training:
+                optimizer.zero_grad()
+
             outputs = model(
                 acoustic_features=acoustics,
                 phoneme_ids=p_ids,
-                attention_mask=mask
+                attention_mask=mask,
             )
-            
-            # Calculate losses only on valid tokens (mask == True)
-            # 1. Match Loss (Regression 0-100)
-            m_loss = reg_loss_fn(outputs["match_score"], matches)
-            m_loss = (m_loss * mask).sum() / max(1, mask.sum())
-            
-            # 2. Duration Loss (Regression 0-100)
-            d_loss = reg_loss_fn(outputs["duration_score"], durations)
-            d_loss = (d_loss * mask).sum() / max(1, mask.sum())
-            
-            # 3. Presence Loss (Binary Classification)
-            p_loss = bce_loss_fn(outputs["presence_logit"], presences)
-            p_loss = (p_loss * mask).sum() / max(1, mask.sum())
-            
-            # Weighted multi-task loss
-            total_loss = m_loss + d_loss + (10.0 * p_loss) # Boost BCE weight since it's naturally smaller
-            
-            total_loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-            
-            epoch_match_loss += m_loss.item()
-            epoch_dur_loss += d_loss.item()
-            epoch_pres_loss += p_loss.item()
-            steps += 1
-            words_since_log += batch_words
-            
-            if steps % args.log_every == 0:
-                elapsed = time.time() - start_time
+
+            m_loss = _masked_mean(reg_loss_fn(outputs["match_score"], matches), mask)
+            d_loss = _masked_mean(reg_loss_fn(outputs["duration_score"], durations), mask)
+            p_loss = _masked_mean(bce_loss_fn(outputs["presence_logit"], presences), mask)
+            batch_total_loss = m_loss + d_loss + (10.0 * p_loss)
+
+            if training:
+                batch_total_loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+
+            total_match_loss += m_loss.item()
+            total_dur_loss += d_loss.item()
+            total_pres_loss += p_loss.item()
+            total_loss += batch_total_loss.item()
+            total_steps += 1
+
+            if log_every > 0 and total_steps % log_every == 0:
+                elapsed = max(time.time() - start_time, 1e-6)
                 print(
-                    f"Step {steps:05d} | "
+                    f"{phase.capitalize()} Step {total_steps:05d} | "
                     f"Match L: {m_loss.item():.2f} | "
                     f"Dur L: {d_loss.item():.2f} | "
                     f"Pres L: {p_loss.item():.4f} | "
@@ -179,16 +223,156 @@ def main():
                 )
                 start_time = time.time()
                 words_since_log = 0
-                
-        # Save epoch checkpoint
-        ckpt_path = checkpoint_dir / f"scorer_epoch_{epoch + 1}.pt"
-        torch.save({
-            'epoch': epoch + 1,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-        }, ckpt_path)
-        print(f"Saved checkpoint to {ckpt_path}")
-        print(f"Epoch {epoch + 1} Averages -> Match: {epoch_match_loss/steps:.2f}, Dur: {epoch_dur_loss/steps:.2f}, Pres: {epoch_pres_loss/steps:.4f}")
+
+    if total_steps == 0:
+        raise RuntimeError(f"{phase} dataloader produced zero batches.")
+
+    return {
+        "steps": float(total_steps),
+        "words": float(total_words),
+        "match_loss": total_match_loss / total_steps,
+        "duration_loss": total_dur_loss / total_steps,
+        "presence_loss": total_pres_loss / total_steps,
+        "total_loss": total_loss / total_steps,
+    }
+
+
+def _save_checkpoint(
+    path: Path,
+    *,
+    epoch: int,
+    model: PhonemeScorerModel,
+    optimizer: AdamW,
+    train_metrics: dict[str, float],
+    val_metrics: dict[str, float] | None,
+) -> None:
+    torch.save(
+        {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "train_metrics": train_metrics,
+            "val_metrics": val_metrics,
+        },
+        path,
+    )
+
+def main():
+    args = build_parser().parse_args()
+    device = torch.device(args.device)
+
+    train_features_dir = Path(args.features_dir)
+    val_features_dir = Path(args.val_features_dir) if args.val_features_dir else None
+
+    model = PhonemeScorerModel().to(device)
+    optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=1e-2)
+
+    reg_loss_fn = nn.SmoothL1Loss(reduction="none")
+    bce_loss_fn = nn.BCEWithLogitsLoss(reduction="none")
+
+    checkpoint_dir = Path(args.checkpoint_dir)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    train_loader = _build_dataloader(
+        features_dir=train_features_dir,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        prefetch_factor=args.prefetch_factor,
+        split_name="train",
+        shuffle=True,
+    )
+    val_loader = None
+    if val_features_dir is not None:
+        val_loader = _build_dataloader(
+            features_dir=val_features_dir,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            prefetch_factor=args.prefetch_factor,
+            split_name="val",
+            shuffle=False,
+        )
+
+    best_val_loss = float("inf")
+
+    for epoch in range(args.epochs):
+        print(f"--- Epoch {epoch + 1}/{args.epochs} ---")
+        train_metrics = _run_epoch(
+            model=model,
+            dataloader=train_loader,
+            device=device,
+            reg_loss_fn=reg_loss_fn,
+            bce_loss_fn=bce_loss_fn,
+            optimizer=optimizer,
+            log_every=args.log_every,
+            phase="train",
+            negative_sampling_prob=args.negative_sampling_prob,
+        )
+        print(
+            f"Train Summary | Epoch {epoch + 1} | "
+            f"Steps: {int(train_metrics['steps'])} | "
+            f"Words: {int(train_metrics['words'])} | "
+            f"Total: {train_metrics['total_loss']:.4f} | "
+            f"Match: {train_metrics['match_loss']:.4f} | "
+            f"Dur: {train_metrics['duration_loss']:.4f} | "
+            f"Pres: {train_metrics['presence_loss']:.4f}"
+        )
+
+        val_metrics = None
+        if val_loader is not None:
+            val_metrics = _run_epoch(
+                model=model,
+                dataloader=val_loader,
+                device=device,
+                reg_loss_fn=reg_loss_fn,
+                bce_loss_fn=bce_loss_fn,
+                optimizer=None,
+                log_every=args.log_every,
+                phase="val",
+                negative_sampling_prob=0.0,
+            )
+            print(
+                f"Val Summary   | Epoch {epoch + 1} | "
+                f"Steps: {int(val_metrics['steps'])} | "
+                f"Words: {int(val_metrics['words'])} | "
+                f"Total: {val_metrics['total_loss']:.4f} | "
+                f"Match: {val_metrics['match_loss']:.4f} | "
+                f"Dur: {val_metrics['duration_loss']:.4f} | "
+                f"Pres: {val_metrics['presence_loss']:.4f}"
+            )
+
+        epoch_ckpt_path = checkpoint_dir / f"scorer_epoch_{epoch + 1}.pt"
+        latest_ckpt_path = checkpoint_dir / "scorer_latest.pt"
+        _save_checkpoint(
+            epoch_ckpt_path,
+            epoch=epoch + 1,
+            model=model,
+            optimizer=optimizer,
+            train_metrics=train_metrics,
+            val_metrics=val_metrics,
+        )
+        _save_checkpoint(
+            latest_ckpt_path,
+            epoch=epoch + 1,
+            model=model,
+            optimizer=optimizer,
+            train_metrics=train_metrics,
+            val_metrics=val_metrics,
+        )
+        print(f"Saved checkpoint to {epoch_ckpt_path}")
+        print(f"Updated latest checkpoint at {latest_ckpt_path}")
+
+        if val_metrics is not None and val_metrics["total_loss"] < best_val_loss:
+            best_val_loss = val_metrics["total_loss"]
+            best_ckpt_path = checkpoint_dir / "scorer_best.pt"
+            _save_checkpoint(
+                best_ckpt_path,
+                epoch=epoch + 1,
+                model=model,
+                optimizer=optimizer,
+                train_metrics=train_metrics,
+                val_metrics=val_metrics,
+            )
+            print(f"New best validation checkpoint saved to {best_ckpt_path} (total_loss={best_val_loss:.4f})")
 
 if __name__ == "__main__":
     main()
