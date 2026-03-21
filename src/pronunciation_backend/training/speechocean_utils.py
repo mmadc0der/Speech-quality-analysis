@@ -6,7 +6,8 @@ from typing import Any
 
 from pronunciation_backend.training.cmudict_utils import normalize_word_token, strip_phone_stress
 
-EXPECTED_ROOT_FILES = ("scores.json", "train/wav.scp", "test/wav.scp")
+EXPECTED_KALDI_FILES = ("train/wav.scp", "test/wav.scp")
+SCORES_LOCATIONS = ("scores.json", "resource/scores.json")
 
 
 def resolve_speechocean_raw_root(dataset_root: Path) -> Path:
@@ -21,6 +22,7 @@ def resolve_speechocean_raw_root(dataset_root: Path) -> Path:
     if dataset_root.exists():
         for scores_path in dataset_root.rglob("scores.json"):
             discovered.append(scores_path.parent)
+            discovered.append(scores_path.parent.parent)
     candidates.extend(sorted(discovered, key=lambda path: (len(path.parts), str(path))))
     for candidate in candidates:
         if _looks_like_raw_root(candidate):
@@ -43,6 +45,17 @@ def load_scores(path: Path) -> dict[str, dict[str, Any]]:
     if not isinstance(payload, dict):
         raise ValueError(f"Expected scores payload to be a JSON object: {path}")
     return payload
+
+
+def resolve_scores_path(raw_root: Path) -> Path:
+    for relative in SCORES_LOCATIONS:
+        candidate = raw_root / relative
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        f"Could not find SpeechOcean762 scores file under {raw_root}. "
+        "Expected scores.json or resource/scores.json."
+    )
 
 
 def read_kaldi_mapping(path: Path) -> dict[str, str]:
@@ -117,4 +130,8 @@ def is_omission_pronunciation(pronounced_phone: str | None) -> bool:
 
 
 def _looks_like_raw_root(path: Path) -> bool:
-    return path.exists() and all((path / relative).exists() for relative in EXPECTED_ROOT_FILES)
+    return (
+        path.exists()
+        and any((path / relative).exists() for relative in SCORES_LOCATIONS)
+        and all((path / relative).exists() for relative in EXPECTED_KALDI_FILES)
+    )

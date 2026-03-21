@@ -18,6 +18,7 @@ from pronunciation_backend.training.speechocean_utils import (
     phone_scores_from_word,
     pronunciation_class_from_score,
     resolve_speechocean_raw_root,
+    resolve_scores_path,
 )
 from pronunciation_backend.training.textgrid_utils import Interval, parse_textgrid
 
@@ -195,7 +196,7 @@ def main() -> int:
     output_dir = Path(args.output_dir) if args.output_dir else dataset_root / "aligned"
     textgrid_root = Path(args.textgrid_root)
     raw_root = resolve_speechocean_raw_root(dataset_root)
-    scores = load_scores(raw_root / "scores.json")
+    scores = load_scores(resolve_scores_path(raw_root))
 
     if not prepared_dir.exists():
         print(f"missing prepared dir: {prepared_dir}")

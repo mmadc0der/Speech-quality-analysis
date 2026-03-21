@@ -13,6 +13,7 @@ from pronunciation_backend.training.speechocean_utils import (
     read_kaldi_mapping,
     read_wav_scp,
     resolve_speechocean_raw_root,
+    resolve_scores_path,
 )
 
 
@@ -119,7 +120,7 @@ def main() -> int:
 
     raw_root = resolve_speechocean_raw_root(dataset_root)
     output_dir = Path(args.output_dir) if args.output_dir else dataset_root / "prepared"
-    scores = load_scores(raw_root / "scores.json")
+    scores = load_scores(resolve_scores_path(raw_root))
 
     official_train_dir = raw_root / "train"
     official_test_dir = raw_root / "test"

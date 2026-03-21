@@ -35,7 +35,7 @@ def test_prepare_speechocean762_creates_speaker_disjoint_val_split(tmp_path: Pat
     raw_root = dataset_root / "raw" / "speechocean762"
 
     _write_json(
-        raw_root / "scores.json",
+        raw_root / "resource" / "scores.json",
         {
             "utt-a": {"text": "WE CALL", "words": []},
             "utt-b": {"text": "IT BEAR", "words": []},
@@ -79,7 +79,7 @@ def test_prepare_speechocean762_creates_speaker_disjoint_val_split(tmp_path: Pat
 def test_resolve_speechocean_raw_root_finds_deeply_nested_unpacked_root(tmp_path: Path) -> None:
     dataset_root = tmp_path / "speechocean762"
     raw_root = dataset_root / "unpacked" / "speechocean762" / "speechocean762"
-    _write_json(raw_root / "scores.json", {})
+    _write_json(raw_root / "resource" / "scores.json", {})
     _write_text(raw_root / "train" / "wav.scp", "")
     _write_text(raw_root / "test" / "wav.scp", "")
 
@@ -93,7 +93,7 @@ def test_build_speechocean762_aligned_emits_phone_labels_from_scores(tmp_path: P
     textgrid_root = dataset_root / "textgrids"
 
     _write_json(
-        raw_root / "scores.json",
+        raw_root / "resource" / "scores.json",
         {
             "utt-test": {
                 "text": "BEAR",
