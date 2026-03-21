@@ -81,7 +81,13 @@ class PhonemeScorerModel(nn.Module):
             activation='gelu',
             batch_first=True
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        # Disable nested tensor conversion to avoid prototype warnings and keep
+        # runtime behavior more predictable across train/validation passes.
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=n_layers,
+            enable_nested_tensor=False,
+        )
         
         # 4. Multi-Task Scoring Heads
         # Each head takes the contextualized d_model vector and predicts its target

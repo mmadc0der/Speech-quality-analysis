@@ -1,5 +1,6 @@
 import argparse
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,8 @@ def apply_negative_sampling(
     match_targets: torch.Tensor,
     presence_targets: torch.Tensor,
     attention_mask: torch.Tensor,
-    prob: float = 0.15
+    prob: float = 0.15,
+    rng: torch.Generator | None = None,
 ):
     """
     Applies self-supervised negative sampling to simulate mispronunciations and omissions.
@@ -29,12 +31,12 @@ def apply_negative_sampling(
     device = phoneme_ids.device
     
     # Random floats for deciding augmentations
-    rand_tensor = torch.rand(batch_size, seq_len, device=device)
+    rand_tensor = torch.rand(batch_size, seq_len, generator=rng, device="cpu").to(device=device, non_blocking=True)
     
     # 1. Substitution (prob/2): We tell the model to expect the WRONG phoneme.
     # It should learn that the acoustics don't match the expected phoneme, so match_score drops.
     sub_mask = (rand_tensor < (prob / 2)) & attention_mask
-    random_phonemes = torch.randint(2, 42, (batch_size, seq_len), device=device) # 2-41 are valid phonemes
+    random_phonemes = torch.randint(2, 42, (batch_size, seq_len), generator=rng, device="cpu").to(device=device, non_blocking=True) # 2-41 are valid phonemes
     phoneme_ids = torch.where(sub_mask, random_phonemes, phoneme_ids)
     match_targets = torch.where(sub_mask, torch.tensor(15.0, device=device), match_targets)
     
@@ -61,6 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prefetch-factor", type=int, default=4, help="Dataloader prefetch factor")
     parser.add_argument("--checkpoint-dir", required=True, help="Where to save model weights")
     parser.add_argument("--negative-sampling-prob", type=float, default=0.15, help="Probability of synthetic corruption during training.")
+    parser.add_argument("--train-seed", type=int, default=1337, help="Base seed for train-time sampling and shuffling.")
+    parser.add_argument("--val-seed", type=int, default=7331, help="Fixed seed for validation-time negative sampling.")
     return parser
 
 
@@ -135,10 +139,32 @@ def _masked_mean(loss_tensor: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     return (loss_tensor * mask).sum() / max(1, mask.sum())
 
 
+def _make_rng(seed: int) -> torch.Generator:
+    rng = torch.Generator(device="cpu")
+    rng.manual_seed(seed)
+    return rng
+
+
+def _cache_batches(dataloader: DataLoader, *, split_name: str) -> list[dict[str, torch.Tensor]]:
+    started_at = time.time()
+    cached_batches: list[dict[str, torch.Tensor]] = []
+    total_words = 0
+    for batch in dataloader:
+        cached_batch = {key: value.detach().clone() for key, value in batch.items()}
+        cached_batches.append(cached_batch)
+        total_words += int(batch["attention_mask"].size(0))
+    elapsed = max(time.time() - started_at, 1e-6)
+    print(
+        f"{split_name}: cached {len(cached_batches)} batch(es) / {total_words} words in CPU RAM "
+        f"({total_words / elapsed:.1f} words/s)"
+    )
+    return cached_batches
+
+
 def _run_epoch(
     *,
     model: PhonemeScorerModel,
-    dataloader: DataLoader,
+    batches: Iterable[dict[str, torch.Tensor]],
     device: torch.device,
     reg_loss_fn: nn.Module,
     bce_loss_fn: nn.Module,
@@ -146,6 +172,7 @@ def _run_epoch(
     log_every: int,
     phase: str,
     negative_sampling_prob: float,
+    rng_seed: int,
 ) -> dict[str, float]:
     training = optimizer is not None
     if training:
@@ -161,10 +188,11 @@ def _run_epoch(
     total_words = 0
     words_since_log = 0
     start_time = time.time()
+    rng = _make_rng(rng_seed)
 
     grad_context = torch.enable_grad() if training else torch.no_grad()
     with grad_context:
-        for batch in dataloader:
+        for batch in batches:
             batch_words = int(batch["attention_mask"].size(0))
             total_words += batch_words
             words_since_log += batch_words
@@ -185,6 +213,7 @@ def _run_epoch(
                     presences,
                     mask,
                     prob=negative_sampling_prob,
+                    rng=rng,
                 )
 
             if training:
@@ -233,7 +262,7 @@ def _run_epoch(
         "match_loss": total_match_loss / total_steps,
         "duration_loss": total_dur_loss / total_steps,
         "presence_loss": total_pres_loss / total_steps,
-        "total_loss": total_loss / total_steps,
+        "objective_loss": total_loss / total_steps,
     }
 
 
@@ -281,7 +310,7 @@ def main():
         split_name="train",
         shuffle=True,
     )
-    val_loader = None
+    val_batches = None
     if val_features_dir is not None:
         val_loader = _build_dataloader(
             features_dir=val_features_dir,
@@ -291,14 +320,15 @@ def main():
             split_name="val",
             shuffle=False,
         )
+        val_batches = _cache_batches(val_loader, split_name="val")
 
-    best_val_loss = float("inf")
+    best_val_match_loss = float("inf")
 
     for epoch in range(args.epochs):
         print(f"--- Epoch {epoch + 1}/{args.epochs} ---")
         train_metrics = _run_epoch(
             model=model,
-            dataloader=train_loader,
+            batches=train_loader,
             device=device,
             reg_loss_fn=reg_loss_fn,
             bce_loss_fn=bce_loss_fn,
@@ -306,42 +336,43 @@ def main():
             log_every=args.log_every,
             phase="train",
             negative_sampling_prob=args.negative_sampling_prob,
+            rng_seed=args.train_seed + epoch,
         )
         print(
             f"Train Summary | Epoch {epoch + 1} | "
             f"Steps: {int(train_metrics['steps'])} | "
             f"Words: {int(train_metrics['words'])} | "
-            f"Total: {train_metrics['total_loss']:.4f} | "
             f"Match: {train_metrics['match_loss']:.4f} | "
             f"Dur: {train_metrics['duration_loss']:.4f} | "
-            f"Pres: {train_metrics['presence_loss']:.4f}"
+            f"Pres: {train_metrics['presence_loss']:.4f} | "
+            f"Objective: {train_metrics['objective_loss']:.4f}"
         )
 
         val_metrics = None
-        if val_loader is not None:
+        if val_batches is not None:
             val_metrics = _run_epoch(
                 model=model,
-                dataloader=val_loader,
+                batches=val_batches,
                 device=device,
                 reg_loss_fn=reg_loss_fn,
                 bce_loss_fn=bce_loss_fn,
                 optimizer=None,
                 log_every=args.log_every,
                 phase="val",
-                negative_sampling_prob=0.0,
+                negative_sampling_prob=args.negative_sampling_prob,
+                rng_seed=args.val_seed,
             )
             print(
                 f"Val Summary   | Epoch {epoch + 1} | "
                 f"Steps: {int(val_metrics['steps'])} | "
                 f"Words: {int(val_metrics['words'])} | "
-                f"Total: {val_metrics['total_loss']:.4f} | "
                 f"Match: {val_metrics['match_loss']:.4f} | "
                 f"Dur: {val_metrics['duration_loss']:.4f} | "
-                f"Pres: {val_metrics['presence_loss']:.4f}"
+                f"Pres: {val_metrics['presence_loss']:.4f} | "
+                f"Objective: {val_metrics['objective_loss']:.4f}"
             )
 
         epoch_ckpt_path = checkpoint_dir / f"scorer_epoch_{epoch + 1}.pt"
-        latest_ckpt_path = checkpoint_dir / "scorer_latest.pt"
         _save_checkpoint(
             epoch_ckpt_path,
             epoch=epoch + 1,
@@ -350,19 +381,10 @@ def main():
             train_metrics=train_metrics,
             val_metrics=val_metrics,
         )
-        _save_checkpoint(
-            latest_ckpt_path,
-            epoch=epoch + 1,
-            model=model,
-            optimizer=optimizer,
-            train_metrics=train_metrics,
-            val_metrics=val_metrics,
-        )
         print(f"Saved checkpoint to {epoch_ckpt_path}")
-        print(f"Updated latest checkpoint at {latest_ckpt_path}")
 
-        if val_metrics is not None and val_metrics["total_loss"] < best_val_loss:
-            best_val_loss = val_metrics["total_loss"]
+        if val_metrics is not None and val_metrics["match_loss"] < best_val_match_loss:
+            best_val_match_loss = val_metrics["match_loss"]
             best_ckpt_path = checkpoint_dir / "scorer_best.pt"
             _save_checkpoint(
                 best_ckpt_path,
@@ -372,7 +394,10 @@ def main():
                 train_metrics=train_metrics,
                 val_metrics=val_metrics,
             )
-            print(f"New best validation checkpoint saved to {best_ckpt_path} (total_loss={best_val_loss:.4f})")
+            print(
+                f"New best validation checkpoint saved to {best_ckpt_path} "
+                f"(match_loss={best_val_match_loss:.4f})"
+            )
 
 if __name__ == "__main__":
     main()
