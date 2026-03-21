@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from pronunciation_backend.training.build_speechocean762_aligned import main as build_speechocean762_aligned_main
+from pronunciation_backend.training.prepare_speechocean762_mfa import main as prepare_speechocean762_mfa_main
 from pronunciation_backend.training.prepare_speechocean762 import main as prepare_speechocean762_main
 from pronunciation_backend.training.schemas import PreparedUtteranceArtifact, TrainingUtteranceArtifact
 from pronunciation_backend.training.speechocean_utils import resolve_speechocean_raw_root
@@ -200,3 +201,48 @@ item []:
     assert [label.human_score for label in artifact.phone_labels] == [2.0, 1.0, 0.2]
     assert artifact.phone_labels[2].omission_label is True
     assert artifact.phone_labels[2].pronounced_phone == "<unk>"
+
+
+def test_prepare_speechocean762_mfa_materializes_mirrored_audio_and_lab(tmp_path: Path, monkeypatch) -> None:
+    dataset_root = tmp_path / "speechocean762"
+    prepared_dir = dataset_root / "prepared"
+    source_audio = dataset_root / "unpacked" / "speechocean762" / "WAVE" / "SPEAKER0001" / "utt-a.WAV"
+    output_dir = dataset_root / "mfa_corpus"
+
+    _write_text(source_audio, "fake wav bytes")
+    prepared_dir.mkdir(parents=True, exist_ok=True)
+    prepared_row = PreparedUtteranceArtifact(
+        utterance_id="utt-a",
+        speaker_id="0001",
+        dataset="speechocean762",
+        split="train",
+        text="WE CALL IT BEAR",
+        normalized_text="we call it bear",
+        audio_path="unpacked/speechocean762/WAVE/SPEAKER0001/utt-a.WAV",
+        transcript_path=None,
+    )
+    _write_text(prepared_dir / "train.jsonl", prepared_row.model_dump_json() + "\n")
+    _write_text(prepared_dir / "val.jsonl", "")
+    _write_text(prepared_dir / "test.jsonl", "")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "prepare_speechocean762_mfa",
+            "--dataset-root",
+            str(dataset_root),
+            "--output-dir",
+            str(output_dir),
+            "--link-mode",
+            "copy",
+            "--overwrite",
+        ],
+    )
+    assert prepare_speechocean762_mfa_main() == 0
+
+    mirrored_audio = output_dir / "unpacked" / "speechocean762" / "WAVE" / "SPEAKER0001" / "utt-a.WAV"
+    mirrored_lab = mirrored_audio.with_suffix(".lab")
+    assert mirrored_audio.exists()
+    assert mirrored_audio.read_text(encoding="utf-8") == "fake wav bytes"
+    assert mirrored_lab.read_text(encoding="utf-8") == "WE CALL IT BEAR\n"
