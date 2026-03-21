@@ -1,4 +1,5 @@
 import argparse
+import builtins
 import time
 from collections.abc import Iterable
 from pathlib import Path
@@ -16,6 +17,12 @@ from pronunciation_backend.training.mmap_dataset import (
     resolve_mmap_dataset_dir,
 )
 from pronunciation_backend.training.scorer_model import PhonemeScorerModel
+
+
+def _log(*args, **kwargs) -> None:
+    kwargs.setdefault("flush", True)
+    builtins.print(*args, **kwargs)
+
 
 def apply_negative_sampling(
     acoustic_features: torch.Tensor,
@@ -97,9 +104,9 @@ def _resolve_split(features_dir: Path, *, split_name: str) -> tuple[Path | None,
 
 def _describe_split(features_dir: Path, *, split_name: str, mmap_dir: Path | None, jsonl_paths: list[Path]) -> None:
     if mmap_dir is not None:
-        print(f"{split_name}: using mmap dataset from {mmap_dir}")
+        _log(f"{split_name}: using mmap dataset from {mmap_dir}")
     else:
-        print(f"{split_name}: found {len(jsonl_paths)} JSONL feature shard(s) in {features_dir}")
+        _log(f"{split_name}: found {len(jsonl_paths)} JSONL feature shard(s) in {features_dir}")
 
 
 def _build_dataloader(
@@ -154,7 +161,7 @@ def _build_dataloader(
 
     dataset = WordIterableDataset(jsonl_paths, batch_size=batch_size)
     if shuffle_mode != "none":
-        print(f"{split_name}: block shuffle is disabled because JSONL streaming uses IterableDataset.")
+        _log(f"{split_name}: block shuffle is disabled because JSONL streaming uses IterableDataset.")
     return (
         DataLoader(
             dataset,
@@ -196,7 +203,7 @@ def _cache_batches(dataloader: DataLoader, *, split_name: str) -> list[dict[str,
         cached_batches.append(cached_batch)
         total_words += int(batch["attention_mask"].size(0))
     elapsed = max(time.time() - started_at, 1e-6)
-    print(
+    _log(
         f"{split_name}: cached {len(cached_batches)} batch(es) / {total_words} words in CPU RAM "
         f"({total_words / elapsed:.1f} words/s)"
     )
@@ -285,7 +292,7 @@ def _run_epoch(
 
             if log_every > 0 and total_steps % log_every == 0:
                 elapsed = max(time.time() - start_time, 1e-6)
-                print(
+                _log(
                     f"{phase.capitalize()} Step {total_steps:05d} | "
                     f"Match L: {m_loss.item():.2f} | "
                     f"Dur L: {d_loss.item():.2f} | "
@@ -371,7 +378,7 @@ def main():
     best_val_match_loss = float("inf")
 
     for epoch in range(args.epochs):
-        print(f"--- Epoch {epoch + 1}/{args.epochs} ---")
+        _log(f"--- Epoch {epoch + 1}/{args.epochs} ---")
         if train_batch_sampler is not None:
             train_batch_sampler.set_epoch(epoch)
         train_metrics = _run_epoch(
@@ -386,7 +393,7 @@ def main():
             negative_sampling_prob=args.negative_sampling_prob,
             rng_seed=args.train_seed + epoch,
         )
-        print(
+        _log(
             f"Train Summary | Epoch {epoch + 1} | "
             f"Steps: {int(train_metrics['steps'])} | "
             f"Words: {int(train_metrics['words'])} | "
@@ -410,7 +417,7 @@ def main():
                 negative_sampling_prob=args.negative_sampling_prob,
                 rng_seed=args.val_seed,
             )
-            print(
+            _log(
                 f"Val Summary   | Epoch {epoch + 1} | "
                 f"Steps: {int(val_metrics['steps'])} | "
                 f"Words: {int(val_metrics['words'])} | "
@@ -429,7 +436,7 @@ def main():
             train_metrics=train_metrics,
             val_metrics=val_metrics,
         )
-        print(f"Saved checkpoint to {epoch_ckpt_path}")
+        _log(f"Saved checkpoint to {epoch_ckpt_path}")
 
         if val_metrics is not None and val_metrics["match_loss"] < best_val_match_loss:
             best_val_match_loss = val_metrics["match_loss"]
@@ -442,7 +449,7 @@ def main():
                 train_metrics=train_metrics,
                 val_metrics=val_metrics,
             )
-            print(
+            _log(
                 f"New best validation checkpoint saved to {best_ckpt_path} "
                 f"(match_loss={best_val_match_loss:.4f})"
             )
