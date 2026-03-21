@@ -16,6 +16,10 @@ from pronunciation_backend.training.mmap_dataset import (
     WordMemmapDataset,
     resolve_mmap_dataset_dir,
 )
+from pronunciation_backend.training.parquet_dataset import (
+    WordParquetDataset,
+    resolve_parquet_dataset_path,
+)
 from pronunciation_backend.training.scorer_model import PhonemeScorerModel
 
 
@@ -88,22 +92,58 @@ def build_parser() -> argparse.ArgumentParser:
         default=16_384,
         help="Number of contiguous words to read before shuffling locally inside a block.",
     )
+    parser.add_argument(
+        "--force-mmap",
+        action="store_true",
+        help="Use mmap .npy tables even if <features-dir>/parquet/words.parquet exists.",
+    )
+    parser.add_argument(
+        "--parquet-preload",
+        action="store_true",
+        help="Load the Parquet split fully into RAM (avoids per-row decode; best with --num-workers 0).",
+    )
     return parser
 
 
-def _resolve_split(features_dir: Path, *, split_name: str) -> tuple[Path | None, list[Path]]:
+def _resolve_split(
+    features_dir: Path,
+    *,
+    split_name: str,
+    force_mmap: bool,
+) -> tuple[Path | None, Path | None, list[Path]]:
+    """
+    Returns (parquet_path, mmap_dir, jsonl_paths).
+    Prefers Parquet when <features-dir>/parquet/words.parquet exists unless force_mmap is set.
+    """
     if not features_dir.exists():
         raise FileNotFoundError(f"{split_name} features dir not found: {features_dir}")
 
     mmap_dir = resolve_mmap_dataset_dir(features_dir)
     jsonl_paths = sorted(list(features_dir.glob("part-*.jsonl")))
-    if mmap_dir is None and not jsonl_paths:
-        raise ValueError(f"No mmap dataset or part-*.jsonl files found in {features_dir}")
-    return mmap_dir, jsonl_paths
+    parquet_path: Path | None = None
+    if not force_mmap:
+        parquet_path = resolve_parquet_dataset_path(features_dir)
 
-
-def _describe_split(features_dir: Path, *, split_name: str, mmap_dir: Path | None, jsonl_paths: list[Path]) -> None:
+    if parquet_path is not None:
+        return parquet_path, mmap_dir, jsonl_paths
     if mmap_dir is not None:
+        return None, mmap_dir, jsonl_paths
+    if jsonl_paths:
+        return None, None, jsonl_paths
+    raise ValueError(f"No parquet, mmap dataset, or part-*.jsonl files found in {features_dir}")
+
+
+def _describe_split(
+    features_dir: Path,
+    *,
+    split_name: str,
+    parquet_path: Path | None,
+    mmap_dir: Path | None,
+    jsonl_paths: list[Path],
+) -> None:
+    if parquet_path is not None:
+        _log(f"{split_name}: using dense parquet dataset from {parquet_path}")
+    elif mmap_dir is not None:
         _log(f"{split_name}: using mmap dataset from {mmap_dir}")
     else:
         _log(f"{split_name}: found {len(jsonl_paths)} JSONL feature shard(s) in {features_dir}")
@@ -119,9 +159,21 @@ def _build_dataloader(
     shuffle_mode: str,
     sampler_seed: int,
     shuffle_block_words: int,
+    force_mmap: bool,
+    parquet_preload: bool,
 ) -> tuple[DataLoader, BlockShuffleBatchSampler | None]:
-    mmap_dir, jsonl_paths = _resolve_split(features_dir, split_name=split_name)
-    _describe_split(features_dir, split_name=split_name, mmap_dir=mmap_dir, jsonl_paths=jsonl_paths)
+    parquet_path, mmap_dir, jsonl_paths = _resolve_split(
+        features_dir, split_name=split_name, force_mmap=force_mmap
+    )
+    _describe_split(
+        features_dir,
+        split_name=split_name,
+        parquet_path=parquet_path,
+        mmap_dir=mmap_dir,
+        jsonl_paths=jsonl_paths,
+    )
+    if parquet_preload and num_workers > 0:
+        _log("Warning: --parquet-preload with --num-workers > 0 duplicates data in worker processes; use --num-workers 0 if RAM is tight.")
 
     common_kwargs: dict[str, Any] = {
         "num_workers": num_workers,
@@ -129,6 +181,36 @@ def _build_dataloader(
         "pin_memory": True,
         "persistent_workers": num_workers > 0,
     }
+    if parquet_path is not None:
+        dataset = WordParquetDataset(parquet_path, preload=parquet_preload)
+        if shuffle_mode == "block":
+            batch_sampler = BlockShuffleBatchSampler(
+                len(dataset),
+                batch_size=batch_size,
+                block_words=shuffle_block_words,
+                seed=sampler_seed,
+            )
+            return (
+                DataLoader(
+                    dataset,
+                    batch_sampler=batch_sampler,
+                    collate_fn=collate_word_batches,
+                    **common_kwargs,
+                ),
+                batch_sampler,
+            )
+
+        return (
+            DataLoader(
+                dataset,
+                batch_size=batch_size,
+                shuffle=False,
+                collate_fn=collate_word_batches,
+                **common_kwargs,
+            ),
+            None,
+        )
+
     if mmap_dir is not None:
         dataset = WordMemmapDataset(mmap_dir)
         if shuffle_mode == "block":
@@ -360,6 +442,8 @@ def main():
         shuffle_mode=args.train_shuffle_mode,
         sampler_seed=args.train_seed,
         shuffle_block_words=args.shuffle_block_words,
+        force_mmap=args.force_mmap,
+        parquet_preload=args.parquet_preload,
     )
     val_batches = None
     if val_features_dir is not None:
@@ -372,6 +456,8 @@ def main():
             shuffle_mode="none",
             sampler_seed=args.val_seed,
             shuffle_block_words=args.shuffle_block_words,
+            force_mmap=args.force_mmap,
+            parquet_preload=args.parquet_preload,
         )
         val_batches = _cache_batches(val_loader, split_name="val")
 
