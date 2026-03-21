@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import bisect
 import shutil
+from collections import OrderedDict
 from pathlib import Path
 from typing import Literal
 
@@ -145,10 +147,30 @@ def bake_mmap_to_parquet(
 
 class WordParquetDataset(Dataset):
     """
-    One row per utterance (same samples as WordMemmapDataset). Optional preload copies all rows to RAM.
+    One row per utterance (same samples as WordMemmapDataset).
+
+    Without preload: opens Parquet metadata only (fast). Rows are read from row groups on demand
+    with a small LRU cache — avoids pq.read_table() scanning huge files at init (often stalls on NFS).
+
+    With preload: loads everything into RAM up front (slow init, fastest random access).
     """
 
-    def __init__(self, parquet_path: Path, *, preload: bool = False) -> None:
+    _PARQUET_COLS = (
+        "acoustic_flat",
+        "phoneme_ids",
+        "match_targets",
+        "duration_targets",
+        "presence_targets",
+        "seq_len",
+    )
+
+    def __init__(
+        self,
+        parquet_path: Path,
+        *,
+        preload: bool = False,
+        row_group_cache_max: int = 8,
+    ) -> None:
         super().__init__()
         self.parquet_path = parquet_path
         manifest_path = parquet_path.parent / MMAP_MANIFEST
@@ -156,8 +178,11 @@ class WordParquetDataset(Dataset):
             raise FileNotFoundError(f"Manifest next to parquet not found: {manifest_path}")
         self.manifest = MmapFeatureManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
         self.preload = preload
-        self._rows: list[dict[str, torch.Tensor]] | None = None
-        self._table: pa.Table | None = None
+        self._rows: list[dict[str, torch.Tensor | int]] | None = None
+        self._pf: pq.ParquetFile | None = None
+        self._rg_offsets: list[int] = []
+        self._rg_cache: OrderedDict[int, pa.Table] = OrderedDict()
+        self._row_group_cache_max = max(1, row_group_cache_max)
 
         if preload:
             table = pq.read_table(parquet_path, memory_map=False)
@@ -167,14 +192,32 @@ class WordParquetDataset(Dataset):
                 )
             self._rows = [_row_dict_from_table(table, i) for i in range(table.num_rows)]
         else:
-            self._table = pq.read_table(parquet_path, memory_map=True)
-            if self._table.num_rows != self.manifest.num_utterances:
+            self._pf = pq.ParquetFile(str(parquet_path), memory_map=True)
+            off = 0
+            self._rg_offsets = [0]
+            for rg in range(self._pf.num_row_groups):
+                n = self._pf.metadata.row_group(rg).num_rows
+                off += n
+                self._rg_offsets.append(off)
+            if off != self.manifest.num_utterances:
                 raise ValueError(
-                    f"Parquet rows {self._table.num_rows} != manifest num_utterances {self.manifest.num_utterances}"
+                    f"Parquet row count {off} != manifest num_utterances {self.manifest.num_utterances}"
                 )
 
     def __len__(self) -> int:
         return self.manifest.num_utterances
+
+    def _row_group_table(self, rg: int) -> pa.Table:
+        assert self._pf is not None
+        if rg in self._rg_cache:
+            self._rg_cache.move_to_end(rg)
+            return self._rg_cache[rg]
+        table = self._pf.read_row_group(rg, columns=list(self._PARQUET_COLS))
+        self._rg_cache[rg] = table
+        self._rg_cache.move_to_end(rg)
+        while len(self._rg_cache) > self._row_group_cache_max:
+            self._rg_cache.popitem(last=False)
+        return table
 
     def __getitem__(self, index: int) -> dict:
         if index < 0 or index >= len(self):
@@ -184,8 +227,13 @@ class WordParquetDataset(Dataset):
                 k: v.clone() if isinstance(v, torch.Tensor) else v
                 for k, v in self._rows[index].items()
             }
-        assert self._table is not None
-        return _row_dict_from_table(self._table, index)
+        assert self._pf is not None
+        rg = bisect.bisect_right(self._rg_offsets, index) - 1
+        if rg < 0:
+            raise IndexError(index)
+        local = index - self._rg_offsets[rg]
+        table = self._row_group_table(rg)
+        return _row_dict_from_table(table, local)
 
 
 def _row_dict_from_table(table: pa.Table, index: int) -> dict[str, torch.Tensor | int]:
