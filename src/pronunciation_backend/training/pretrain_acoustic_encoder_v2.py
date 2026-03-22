@@ -168,6 +168,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--features-dir", required=True, help="Path to clean-speech feature split, e.g. /cold/.../libritts/.../splits/train")
     parser.add_argument("--val-features-dir", help="Optional held-out clean-speech validation split.")
     parser.add_argument("--checkpoint-dir", required=True)
+    parser.add_argument(
+        "--checkpoint-prefix",
+        default="acoustic_encoder_v2",
+        help="Filename prefix for saved checkpoints inside --checkpoint-dir.",
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--epochs", type=int, default=10)
@@ -180,6 +185,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--beta1", type=float, default=0.9)
     parser.add_argument("--beta2", type=float, default=0.95)
     parser.add_argument("--dropout", type=float, default=0.05)
+    parser.add_argument("--input-dim", type=int, default=768)
+    parser.add_argument("--d-model", type=int, default=384)
+    parser.add_argument("--num-heads", type=int, default=6)
+    parser.add_argument("--num-layers", type=int, default=6)
+    parser.add_argument("--ffn-dim", type=int, default=1_536)
+    parser.add_argument("--rope-base", type=float, default=10_000.0)
     parser.add_argument("--mask-ratio", type=float, default=0.20)
     parser.add_argument("--mask-block-size", type=int, default=2)
     parser.add_argument("--min-masks", type=int, default=1)
@@ -358,11 +369,24 @@ def _build_dataloader(
 
 
 def _move_batch_to_device(batch: dict[str, torch.Tensor], device: torch.device) -> dict[str, torch.Tensor]:
-    acoustic = batch["acoustic_features"][..., :768]
     return {
-        "acoustic_embeddings": acoustic.to(device, dtype=torch.float32, non_blocking=True),
+        "acoustic_embeddings": batch["acoustic_features"].to(device, dtype=torch.float32, non_blocking=True),
         "attention_mask": batch["attention_mask"].to(device, dtype=torch.bool, non_blocking=True),
     }
+
+
+def _slice_acoustic_embeddings(
+    acoustic_features: torch.Tensor,
+    *,
+    input_dim: int,
+) -> torch.Tensor:
+    if acoustic_features.size(-1) < input_dim:
+        raise ValueError(
+            f"Requested input_dim={input_dim}, but batch only provides {acoustic_features.size(-1)} features."
+        )
+
+    acoustic = acoustic_features[..., :input_dim]
+    return acoustic
 
 
 def _masked_reconstruction_loss(
@@ -422,6 +446,7 @@ def _run_epoch(
     min_masks: int,
     rng_seed: int,
     max_batches: int | None,
+    input_dim: int,
 ) -> dict[str, float]:
     training = optimizer is not None
     model.train(mode=training)
@@ -445,6 +470,10 @@ def _run_epoch(
             words_since_log += batch_words
 
             moved = _move_batch_to_device(batch, device)
+            moved["acoustic_embeddings"] = _slice_acoustic_embeddings(
+                moved["acoustic_embeddings"],
+                input_dim=input_dim,
+            )
             mask_positions = sample_mask_positions(
                 moved["attention_mask"],
                 mask_ratio=mask_ratio,
@@ -526,7 +555,15 @@ def main() -> int:
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    model = AcousticEncoderPretrainModel(dropout=args.dropout).to(device)
+    model = AcousticEncoderPretrainModel(
+        input_dim=args.input_dim,
+        d_model=args.d_model,
+        num_heads=args.num_heads,
+        num_layers=args.num_layers,
+        ffn_dim=args.ffn_dim,
+        dropout=args.dropout,
+        rope_base=args.rope_base,
+    ).to(device)
     optimizer, initialized_dist_for_muon = _build_optimizer(
         model,
         device=device,
@@ -584,6 +621,7 @@ def main() -> int:
                 min_masks=args.min_masks,
                 rng_seed=args.train_seed + epoch,
                 max_batches=args.max_batches,
+                input_dim=args.input_dim,
             )
             _log(
                 f"Train Summary | Epoch {epoch + 1} | "
@@ -607,6 +645,7 @@ def main() -> int:
                     min_masks=args.min_masks,
                     rng_seed=args.val_seed,
                     max_batches=args.max_batches,
+                    input_dim=args.input_dim,
                 )
                 _log(
                     f"Val Summary   | Epoch {epoch + 1} | "
@@ -616,7 +655,7 @@ def main() -> int:
                     f"Recon: {val_metrics['reconstruction_loss']:.6f}"
                 )
 
-            epoch_ckpt_path = checkpoint_dir / f"acoustic_encoder_v2_epoch_{epoch + 1}.pt"
+            epoch_ckpt_path = checkpoint_dir / f"{args.checkpoint_prefix}_epoch_{epoch + 1}.pt"
             _save_checkpoint(
                 epoch_ckpt_path,
                 epoch=epoch + 1,
@@ -630,7 +669,7 @@ def main() -> int:
 
             if val_metrics is not None and val_metrics["reconstruction_loss"] < best_val_loss:
                 best_val_loss = val_metrics["reconstruction_loss"]
-                best_ckpt_path = checkpoint_dir / "acoustic_encoder_v2_best.pt"
+                best_ckpt_path = checkpoint_dir / f"{args.checkpoint_prefix}_best.pt"
                 _save_checkpoint(
                     best_ckpt_path,
                     epoch=epoch + 1,

@@ -5,6 +5,7 @@ from pronunciation_backend.training.pretrain_acoustic_encoder_v2 import (
     _masked_reconstruction_loss,
     _partition_muon_param_groups,
     _prepare_single_process_dist_env,
+    _slice_acoustic_embeddings,
 )
 
 
@@ -72,3 +73,23 @@ def test_prepare_single_process_dist_env_sets_required_keys(monkeypatch) -> None
     assert env_updates["RANK"] == "0"
     assert env_updates["WORLD_SIZE"] == "1"
     assert env_updates["LOCAL_RANK"] == "0"
+
+
+def test_slice_acoustic_embeddings_supports_configurable_input_dim() -> None:
+    acoustic = torch.randn(2, 4, 771)
+
+    sliced = _slice_acoustic_embeddings(acoustic, input_dim=768)
+
+    assert sliced.shape == (2, 4, 768)
+    assert torch.allclose(sliced, acoustic[..., :768])
+
+
+def test_slice_acoustic_embeddings_rejects_too_wide_input_dim() -> None:
+    acoustic = torch.randn(2, 4, 768)
+
+    try:
+        _slice_acoustic_embeddings(acoustic, input_dim=769)
+    except ValueError as exc:
+        assert "Requested input_dim=769" in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("Expected ValueError when input_dim exceeds available features.")
