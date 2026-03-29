@@ -382,7 +382,11 @@ INDEX_HTML = """<!doctype html>
     </section>
 
     <section class="panel stack">
-      <h2>Raw Response</h2>
+      <div class="row">
+        <h2 style="margin: 0;">Raw Response</h2>
+        <button id="copyRawJsonButton">Copy JSON</button>
+        <span id="copyRawJsonStatus" class="footer-note">Nothing copied yet.</span>
+      </div>
       <pre id="rawJson">No response yet.</pre>
     </section>
   </main>
@@ -423,6 +427,8 @@ INDEX_HTML = """<!doctype html>
     const summaryGridEl = document.getElementById("summaryGrid");
     const phoneRowsEl = document.getElementById("phoneRows");
     const rawJsonEl = document.getElementById("rawJson");
+    const copyRawJsonButtonEl = document.getElementById("copyRawJsonButton");
+    const copyRawJsonStatusEl = document.getElementById("copyRawJsonStatus");
 
     function setText(element, text, className = "") {
       element.textContent = text;
@@ -755,6 +761,26 @@ INDEX_HTML = """<!doctype html>
       renderSummary(result);
       renderPhones(result);
       rawJsonEl.textContent = JSON.stringify(result, null, 2);
+      copyRawJsonStatusEl.textContent = "Ready to copy.";
+      copyRawJsonStatusEl.className = "footer-note";
+    }
+
+    async function copyRawJson() {
+      const text = rawJsonEl.textContent || "";
+      if (!text || text === "No response yet.") {
+        copyRawJsonStatusEl.textContent = "No response available to copy.";
+        copyRawJsonStatusEl.className = "footer-note status-bad";
+        return;
+      }
+
+      try {
+        await navigator.clipboard.writeText(text);
+        copyRawJsonStatusEl.textContent = "Raw JSON copied to clipboard.";
+        copyRawJsonStatusEl.className = "footer-note status-ok";
+      } catch (error) {
+        copyRawJsonStatusEl.textContent = `Copy failed: ${error.message}`;
+        copyRawJsonStatusEl.className = "footer-note status-bad";
+      }
     }
 
     async function submitForScoring() {
@@ -805,6 +831,7 @@ INDEX_HTML = """<!doctype html>
     stopButtonEl.addEventListener("click", stopRecording);
     clearButtonEl.addEventListener("click", clearAudio);
     scoreButtonEl.addEventListener("click", submitForScoring);
+    copyRawJsonButtonEl.addEventListener("click", copyRawJson);
     fileInputEl.addEventListener("change", () => {
       if (fileInputEl.files && fileInputEl.files.length > 0) {
         const selected = fileInputEl.files[0];
