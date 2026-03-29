@@ -197,12 +197,34 @@ class MfaForcedAligner:
             and interval.xmax <= word_interval.xmax
             and strip_phone_stress(interval.text).lower() not in SKIP_PHONE_LABELS
         ]
+        all_non_skip_phones = [
+            interval
+            for interval in phone_intervals
+            if strip_phone_stress(interval.text).lower() not in SKIP_PHONE_LABELS
+        ]
         observed_phones = [strip_phone_stress(interval.text) for interval in aligned_phones]
         expected_phones = [strip_phone_stress(phone) for phone in canonical_phones]
         if observed_phones != expected_phones:
+            fallback_phones = [strip_phone_stress(interval.text) for interval in all_non_skip_phones]
+            if fallback_phones == expected_phones:
+                logger.warning(
+                    "MFA word-tier phone selection missed canonical phones; using full phone tier fallback",
+                    extra={
+                        "word": transcript_token,
+                        "word_interval": (word_interval.xmin, word_interval.xmax),
+                        "bounded_phones": observed_phones,
+                        "full_tier_phones": fallback_phones,
+                    },
+                )
+                aligned_phones = all_non_skip_phones
+                observed_phones = fallback_phones
+        if observed_phones != expected_phones:
             raise AlignmentResultError(
                 "MFA phone sequence mismatch: "
-                f"expected={expected_phones} observed={observed_phones}"
+                f"expected={expected_phones} observed={observed_phones} "
+                f"word_interval=({word_interval.xmin:.3f}, {word_interval.xmax:.3f}) "
+                f"all_non_skip={[strip_phone_stress(interval.text) for interval in all_non_skip_phones]} "
+                f"raw_phone_intervals={self._format_intervals(phone_intervals)}"
             )
 
         return self._intervals_to_spans(intervals=aligned_phones, phones=expected_phones, encoded=encoded)
@@ -267,3 +289,12 @@ class MfaForcedAligner:
         if not combined:
             return "no process output"
         return combined[:500]
+
+    def _format_intervals(self, intervals: list[Interval]) -> str:
+        if not intervals:
+            return "[]"
+        formatted = [
+            f"{interval.text!r}@({interval.xmin:.3f},{interval.xmax:.3f})"
+            for interval in intervals
+        ]
+        return "[" + ", ".join(formatted[:12]) + (", ..." if len(formatted) > 12 else "") + "]"

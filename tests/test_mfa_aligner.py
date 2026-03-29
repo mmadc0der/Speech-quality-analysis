@@ -161,3 +161,68 @@ item []:
     assert [span.end_ms for span in spans] == [160, 490, 640]
     assert [span.start_frame for span in spans] == [0, 1, 4]
     assert [span.end_frame for span in spans] == [2, 5, 7]
+
+
+def test_mfa_aligner_falls_back_to_full_phone_tier_when_word_bounds_miss_phones(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    aligner = MfaForcedAligner(
+        command="micromamba run -n mfa mfa",
+        acoustic_model="english_us_arpa",
+        work_root=tmp_path,
+        timeout_seconds=5.0,
+    )
+
+    textgrid = """File type = \"ooTextFile\"
+Object class = \"TextGrid\"
+
+xmin = 0
+xmax = 0.64
+tiers? <exists>
+size = 2
+item []:
+    item [1]:
+        class = \"IntervalTier\"
+        name = \"words\"
+        xmin = 0
+        xmax = 0.64
+        intervals: size = 1
+        intervals [1]:
+            xmin = 0.20
+            xmax = 0.44
+            text = \"cat\"
+    item [2]:
+        class = \"IntervalTier\"
+        name = \"phones\"
+        xmin = 0
+        xmax = 0.64
+        intervals: size = 3
+        intervals [1]:
+            xmin = 0.00
+            xmax = 0.16
+            text = \"K\"
+        intervals [2]:
+            xmin = 0.16
+            xmax = 0.49
+            text = \"AE1\"
+        intervals [3]:
+            xmin = 0.49
+            xmax = 0.64
+            text = \"T\"
+"""
+
+    def _fake_run(args, capture_output, text, timeout, check, env):  # type: ignore[no-untyped-def]
+        del capture_output, text, timeout, check, env
+        output_dir = Path(args[12])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "utterance.TextGrid").write_text(textgrid, encoding="utf-8")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    spans = aligner.align(_entry(), _prepared_audio(), _encoded_frames())
+
+    assert [span.phoneme for span in spans] == ["K", "AE", "T"]
+    assert [span.start_ms for span in spans] == [0, 160, 490]
+    assert [span.end_ms for span in spans] == [160, 490, 640]
