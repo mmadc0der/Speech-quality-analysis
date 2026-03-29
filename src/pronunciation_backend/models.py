@@ -35,6 +35,25 @@ class PhonemeAssessmentPayload(BaseModel):
     ]
 
 
+class QualityClassProbabilitiesPayload(BaseModel):
+    wrong_or_missed: float = Field(ge=0, le=1)
+    accented: float = Field(ge=0, le=1)
+    correct: float = Field(ge=0, le=1)
+
+
+class PronunciationPhonePayload(BaseModel):
+    phoneme: str
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+    expected_score: float = Field(ge=0, le=100)
+    expected_human_score: float = Field(ge=0)
+    omission_probability: float = Field(ge=0, le=1)
+    confidence: float = Field(ge=0, le=1)
+    alignment_confidence: float = Field(ge=0, le=1)
+    predicted_class: Literal["wrong_or_missed", "accented", "correct"]
+    quality_class_probs: QualityClassProbabilitiesPayload
+
+
 class PrimaryIssuePayload(BaseModel):
     phoneme: str
     type: str
@@ -47,16 +66,26 @@ class ReferencePayload(BaseModel):
     asset_path: str | None = None
 
 
+class ModelInfoPayload(BaseModel):
+    runtime_backend: str
+    model_version: str
+    checkpoint_name: str
+    backbone_id: str
+    device: str
+    class_labels: list[str]
+
+
 class PronunciationAssessmentResponse(BaseModel):
     word: str
     accent_target: Literal["en-US"] = "en-US"
     ipa: str
-    overall_score: int = Field(ge=0, le=100)
+    overall_score: float = Field(ge=0, le=100)
     confidence: float = Field(ge=0, le=1)
     audio_quality: AudioQualityPayload
-    phonemes: list[PhonemeAssessmentPayload]
+    phonemes: list[PronunciationPhonePayload]
     primary_issue: PrimaryIssuePayload
     reference: ReferencePayload
+    model_info: ModelInfoPayload
 
 
 @dataclass(frozen=True)

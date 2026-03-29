@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+try:
+    import torch
+except ImportError:  # pragma: no cover - optional runtime
+    torch = None
+
+from pronunciation_backend.models import PhoneFeatures
+from pronunciation_backend.services.scorer_runtime import (
+    ScorerModelInfo,
+    ScorerPhonePrediction,
+    ScorerRuntimeResult,
+)
+from pronunciation_backend.services.tensor_mapper import PhoneFeatureTensorMapper
+from pronunciation_backend.training.scorer_model_v2 import PhonemeScorerModelV2
+from pronunciation_backend.training.scoring_targets import CLASS_ORDER, class_name_from_index
+
+
+def _checkpoint_config_value(payload: dict[str, object], key: str, default: object) -> object:
+    config = payload.get("config")
+    if isinstance(config, dict) and key in config:
+        return config[key]
+    return default
+
+
+@dataclass
+class ScorerV2Runtime:
+    checkpoint_path: Path
+    backbone_id: str
+    device: str = "cpu"
+    strict_load: bool = True
+    tensor_mapper: PhoneFeatureTensorMapper = field(default_factory=PhoneFeatureTensorMapper)
+    _model: PhonemeScorerModelV2 = field(init=False, repr=False)
+    _model_info: ScorerModelInfo = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if torch is None:
+            raise RuntimeError("torch is required to serve the v2 scorer")
+        device = torch.device(self.device)
+        payload = torch.load(self.checkpoint_path, map_location=device)
+        if not isinstance(payload, dict):
+            raise ValueError(f"Unsupported checkpoint payload type: {type(payload)!r}")
+
+        model = PhonemeScorerModelV2(
+            acoustic_input_dim=int(_checkpoint_config_value(payload, "acoustic_input_dim", 768)),
+            d_model=int(_checkpoint_config_value(payload, "d_model", 384)),
+            num_heads=int(_checkpoint_config_value(payload, "num_heads", 6)),
+            acoustic_layers=int(_checkpoint_config_value(payload, "acoustic_layers", 6)),
+            scorer_layers=int(_checkpoint_config_value(payload, "scorer_layers", 2)),
+            ffn_dim=int(_checkpoint_config_value(payload, "ffn_dim", 1_536)),
+            phoneme_vocab_size=int(_checkpoint_config_value(payload, "phoneme_vocab_size", 42)),
+            phoneme_embed_dim=int(_checkpoint_config_value(payload, "phoneme_embed_dim", 48)),
+            dropout=float(_checkpoint_config_value(payload, "dropout", 0.05)),
+            rope_base=float(_checkpoint_config_value(payload, "rope_base", 10_000.0)),
+            use_qk_norm=bool(_checkpoint_config_value(payload, "use_qk_norm", True)),
+        ).to(device)
+        state_dict = payload["model_state_dict"] if "model_state_dict" in payload else payload
+        if not isinstance(state_dict, dict):
+            raise ValueError("checkpoint must contain a model_state_dict dictionary")
+        model.load_state_dict(state_dict, strict=self.strict_load)
+        model.eval()
+        self._model = model
+        self._model_info = ScorerModelInfo(
+            runtime_backend="scorer_v2",
+            model_version="v2",
+            checkpoint_name=self.checkpoint_path.name,
+            backbone_id=self.backbone_id,
+            device=str(device),
+            class_labels=CLASS_ORDER,
+        )
+
+    def model_info(self) -> ScorerModelInfo:
+        return self._model_info
+
+    def score(self, phone_features: list[PhoneFeatures]) -> ScorerRuntimeResult:
+        model_inputs = self.tensor_mapper.build_inputs(phone_features)
+        if torch is None:
+            raise RuntimeError("torch is required to serve the v2 scorer")
+
+        device = next(self._model.parameters()).device
+        model_inputs = {
+            key: value.to(device=device, non_blocking=True)
+            for key, value in model_inputs.items()
+        }
+        with torch.inference_mode():
+            outputs = self._model(
+                acoustic_embeddings=model_inputs["acoustic_embeddings"],
+                phoneme_ids=model_inputs["phoneme_ids"],
+                attention_mask=model_inputs["attention_mask"],
+            )
+
+        mask = model_inputs["attention_mask"][0]
+        class_probs = outputs["class_probs"][0][mask].detach().cpu()
+        expected_scores = outputs["expected_score"][0][mask].detach().cpu().tolist()
+        expected_human_scores = outputs["expected_human_score"][0][mask].detach().cpu().tolist()
+        omission_probabilities = torch.sigmoid(outputs["omission_logit"][0][mask]).detach().cpu().tolist()
+        class_indices = outputs["quality_logits"][0][mask].argmax(dim=-1).detach().cpu().tolist()
+
+        predictions: list[ScorerPhonePrediction] = []
+        for features, probs_tensor, predicted_index, expected_score, expected_human_score, omission_probability in zip(
+            phone_features,
+            class_probs,
+            class_indices,
+            expected_scores,
+            expected_human_scores,
+            omission_probabilities,
+        ):
+            probs = {
+                label: float(prob)
+                for label, prob in zip(CLASS_ORDER, probs_tensor.tolist())
+            }
+            predictions.append(
+                ScorerPhonePrediction(
+                    phoneme=features.phoneme,
+                    start_ms=features.start_ms,
+                    end_ms=features.end_ms,
+                    expected_score=float(expected_score),
+                    expected_human_score=float(expected_human_score),
+                    omission_probability=float(omission_probability),
+                    predicted_class=class_name_from_index(int(predicted_index)),
+                    quality_class_probs=probs,
+                    alignment_confidence=float(features.alignment_confidence),
+                )
+            )
+
+        return ScorerRuntimeResult(
+            phone_predictions=predictions,
+            model_info=self._model_info,
+        )

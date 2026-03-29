@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from functools import lru_cache
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 
-from pronunciation_backend.config import settings
+from pronunciation_backend.config import Settings, settings
 from pronunciation_backend.models import PronunciationAssessmentResponse
 from pronunciation_backend.services.aligner import ConstrainedPhonemeAligner, PhoneFeatureBuilder
 from pronunciation_backend.services.audio_prep import AudioPrepService, AudioValidationError
@@ -12,51 +12,93 @@ from pronunciation_backend.services.feature_encoder import SSLFeatureEncoder
 from pronunciation_backend.services.lexicon import LexiconService, UnknownWordError
 from pronunciation_backend.services.pipeline import PronunciationPipeline
 from pronunciation_backend.services.reference import ReferenceAudioService
-from pronunciation_backend.services.scoring import CalibrationAndIssueService, PhoneScoringHead
+from pronunciation_backend.services.response_mapper import ResponseMapper
+from pronunciation_backend.services.scorer_v2_runtime import ScorerV2Runtime
 
 
-@lru_cache(maxsize=1)
-def get_pipeline() -> PronunciationPipeline:
+def build_pipeline(active_settings: Settings) -> PronunciationPipeline:
+    active_settings.validate_runtime()
+    scorer_runtime = ScorerV2Runtime(
+        checkpoint_path=active_settings.scorer_checkpoint_path,
+        backbone_id=active_settings.backbone_id,
+        device=active_settings.scorer_device,
+        strict_load=active_settings.scorer_strict_load,
+    )
     return PronunciationPipeline(
-        lexicon_service=LexiconService(settings.lexicon_path),
-        reference_audio_service=ReferenceAudioService(settings.reference_manifest_path),
-        audio_prep_service=AudioPrepService(settings),
-        feature_encoder=SSLFeatureEncoder(settings),
+        lexicon_service=LexiconService(active_settings.lexicon_path),
+        reference_audio_service=ReferenceAudioService(active_settings.reference_manifest_path),
+        audio_prep_service=AudioPrepService(active_settings),
+        feature_encoder=SSLFeatureEncoder(active_settings),
         aligner=ConstrainedPhonemeAligner(),
         feature_builder=PhoneFeatureBuilder(),
-        scoring_head=PhoneScoringHead(),
-        calibration_service=CalibrationAndIssueService(),
+        scorer_runtime=scorer_runtime,
+        response_mapper=ResponseMapper(),
     )
 
 
-app = FastAPI(
-    title="Pronunciation Backend MVP",
-    version="0.1.0",
-    description="Word-level American English pronunciation assessment backend.",
-)
+def create_app(
+    *,
+    settings_override: Settings | None = None,
+    pipeline_override: PronunciationPipeline | None = None,
+) -> FastAPI:
+    active_settings = settings_override or settings
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.pipeline = pipeline_override or build_pipeline(active_settings)
+        yield
+
+    app = FastAPI(
+        title="Pronunciation Backend MVP",
+        version="0.2.0",
+        description="Word-level American English pronunciation assessment backend.",
+        lifespan=lifespan,
+    )
+
+    def get_pipeline_from_request(request: Request) -> PronunciationPipeline:
+        pipeline = getattr(request.app.state, "pipeline", None)
+        if pipeline is None:
+            raise RuntimeError("Pronunciation pipeline is not initialized")
+        return pipeline
+
+    @app.get("/health")
+    def health(request: Request) -> dict[str, object]:
+        pipeline = get_pipeline_from_request(request)
+        model_info = pipeline.model_info()
+        return {
+            "status": "ok",
+            "model_ready": True,
+            "runtime_backend": model_info.runtime_backend,
+            "model_version": model_info.model_version,
+            "backbone_id": model_info.backbone_id,
+            "device": model_info.device,
+        }
+
+    @app.get("/v1/words")
+    def supported_words(request: Request) -> dict[str, list[str]]:
+        return {"words": get_pipeline_from_request(request).lexicon_service.all_words()}
+
+    @app.post("/v1/pronunciation/score", response_model=PronunciationAssessmentResponse)
+    async def score_pronunciation(
+        request: Request,
+        word: str = Form(...),
+        audio: UploadFile = File(...),
+        speaker_id: str | None = Form(default=None),
+    ) -> PronunciationAssessmentResponse:
+        del speaker_id  # reserved for future personalization
+        try:
+            audio_bytes = await audio.read()
+            return get_pipeline_from_request(request).assess_word(word=word, audio_bytes=audio_bytes)
+        except UnknownWordError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except AudioValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return app
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
-
-
-@app.get("/v1/words")
-def supported_words() -> dict[str, list[str]]:
-    return {"words": get_pipeline().lexicon_service.all_words()}
-
-
-@app.post("/v1/pronunciation/score", response_model=PronunciationAssessmentResponse)
-async def score_pronunciation(
-    word: str = Form(...),
-    audio: UploadFile = File(...),
-    speaker_id: str | None = Form(default=None),
-) -> PronunciationAssessmentResponse:
-    del speaker_id  # reserved for future personalization
-    try:
-        audio_bytes = await audio.read()
-        return get_pipeline().assess_word(word=word, audio_bytes=audio_bytes)
-    except UnknownWordError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except AudioValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+app = create_app()
