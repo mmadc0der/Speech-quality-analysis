@@ -138,12 +138,10 @@ item []:
         assert isinstance(env, dict)
 
         assert args[8].endswith("mfa_temp")
-        assert args[9] == "--output_format"
-        assert args[10] == "short_textgrid"
-        corpus_dir = Path(args[11])
-        dict_path = Path(args[12])
-        assert args[13] == "english_us_arpa"
-        output_dir = Path(args[14])
+        corpus_dir = Path(args[9])
+        dict_path = Path(args[10])
+        assert args[11] == "english_us_arpa"
+        output_dir = Path(args[12])
         temp_mfa_dir = Path(args[8])
 
         assert (corpus_dir / "utterance.lab").read_text(encoding="utf-8").strip() == "cat"

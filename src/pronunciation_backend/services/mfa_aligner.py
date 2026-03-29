@@ -135,8 +135,6 @@ class MfaForcedAligner:
             "--clean",
             "--temporary_directory",
             str(temp_mfa_dir),
-            "--output_format",
-            "short_textgrid",
             str(corpus_dir),
             str(dictionary_path),
             acoustic_model,
@@ -177,6 +175,7 @@ class MfaForcedAligner:
         encoded: EncodedFrames,
     ) -> list[PhoneSpan]:
         tiers = parse_textgrid(textgrid_path)
+        logger.info("Parsed MFA TextGrid tiers: %s", sorted(tiers.keys()))
         word_intervals = self._select_tier(tiers, self.word_tier, ("word",))
         phone_intervals = self._select_tier(tiers, self.phone_tier, ("phone",))
 
@@ -259,7 +258,9 @@ class MfaForcedAligner:
             tier = lowered.get(name.lower())
             if tier is not None:
                 return tier.intervals  # type: ignore[return-value]
-        raise AlignmentResultError(f"Could not find tier {preferred!r} in MFA TextGrid output.")
+        raise AlignmentResultError(
+            f"Could not find tier {preferred!r} in MFA TextGrid output. Available tiers: {sorted(tiers.keys())}"
+        )
 
     def _format_process_output(self, stdout: str, stderr: str) -> str:
         combined = " | ".join(part.strip() for part in (stderr, stdout) if part and part.strip())
