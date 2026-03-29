@@ -17,6 +17,23 @@ from pronunciation_backend.training.cmudict_utils import normalize_word_token, s
 from pronunciation_backend.training.textgrid_utils import Interval, parse_textgrid
 
 SKIP_PHONE_LABELS = {"", "sp", "sil", "spn", "<eps>"}
+ARPABET_VOWELS = {
+    "AA",
+    "AE",
+    "AH",
+    "AO",
+    "AW",
+    "AY",
+    "EH",
+    "ER",
+    "EY",
+    "IH",
+    "IY",
+    "OW",
+    "OY",
+    "UH",
+    "UW",
+}
 MFA_ALIGNMENT_CONFIDENCE = 0.92
 logger = logging.getLogger(__name__)
 
@@ -66,10 +83,11 @@ class MfaForcedAligner:
             wav_path = corpus_dir / f"{stem}.wav"
             lab_path = corpus_dir / f"{stem}.lab"
             dict_path = base_dir / "lexicon.dict"
+            dictionary_phones = self._dictionary_phones(entry)
 
             sf.write(wav_path, prepared.samples, prepared.sample_rate)
             lab_path.write_text(transcript_token + "\n", encoding="utf-8")
-            dict_path.write_text(f"{transcript_token} {' '.join(entry.phones)}\n", encoding="utf-8")
+            dict_path.write_text(f"{transcript_token} {' '.join(dictionary_phones)}\n", encoding="utf-8")
 
             process = self._run_mfa(
                 command_argv=command_argv,
@@ -186,7 +204,9 @@ class MfaForcedAligner:
         ]
         if len(matching_words) != 1:
             raise AlignmentResultError(
-                f"Expected exactly one aligned word interval for {transcript_token!r}, found {len(matching_words)}."
+                f"Expected exactly one aligned word interval for {transcript_token!r}, found {len(matching_words)}. "
+                f"raw_word_intervals={self._format_intervals(word_intervals)} "
+                f"raw_phone_intervals={self._format_intervals(phone_intervals)}"
             )
         word_interval = matching_words[0]
 
@@ -289,6 +309,31 @@ class MfaForcedAligner:
         if not combined:
             return "no process output"
         return combined[:500]
+
+    def _dictionary_phones(self, entry: LexiconEntry) -> list[str]:
+        if not entry.syllables or not entry.stress_pattern:
+            return list(entry.phones)
+
+        flattened = [phone for syllable in entry.syllables for phone in syllable]
+        if [strip_phone_stress(phone) for phone in flattened] != [strip_phone_stress(phone) for phone in entry.phones]:
+            return list(entry.phones)
+
+        stressed: list[str] = []
+        for syllable_index, syllable in enumerate(entry.syllables):
+            stress_digit = self._stress_digit(entry.stress_pattern, syllable_index)
+            for phone in syllable:
+                base_phone = strip_phone_stress(phone)
+                if base_phone in ARPABET_VOWELS:
+                    stressed.append(f"{base_phone}{stress_digit}")
+                else:
+                    stressed.append(base_phone)
+        return stressed
+
+    def _stress_digit(self, stress_pattern: str, syllable_index: int) -> str:
+        if syllable_index >= len(stress_pattern):
+            return "0"
+        digit = stress_pattern[syllable_index]
+        return digit if digit in {"0", "1", "2"} else "0"
 
     def _format_intervals(self, intervals: list[Interval]) -> str:
         if not intervals:

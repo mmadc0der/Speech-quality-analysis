@@ -45,6 +45,8 @@ def _entry() -> LexiconEntry:
         phones=["K", "AE", "T"],
         ipa="kæt",
         reference_audio_id="cat_en_us_01",
+        syllables=[["K", "AE", "T"]],
+        stress_pattern="1",
     )
 
 
@@ -145,7 +147,7 @@ item []:
         temp_mfa_dir = Path(args[8])
 
         assert (corpus_dir / "utterance.lab").read_text(encoding="utf-8").strip() == "cat"
-        assert "cat K AE T" in dict_path.read_text(encoding="utf-8")
+        assert "cat K AE1 T" in dict_path.read_text(encoding="utf-8")
         assert temp_mfa_dir.name == "mfa_temp"
 
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -226,3 +228,22 @@ item []:
     assert [span.phoneme for span in spans] == ["K", "AE", "T"]
     assert [span.start_ms for span in spans] == [0, 160, 490]
     assert [span.end_ms for span in spans] == [160, 490, 640]
+
+
+def test_mfa_aligner_builds_stressed_dictionary_from_syllables() -> None:
+    aligner = MfaForcedAligner(
+        command="micromamba run -n mfa mfa",
+        acoustic_model="english_us_arpa",
+        work_root=Path("."),
+    )
+
+    entry = LexiconEntry(
+        word="banana",
+        phones=["B", "AH", "N", "AE", "N", "AH"],
+        ipa="bənænə",
+        reference_audio_id="banana_en_us_01",
+        syllables=[["B", "AH"], ["N", "AE"], ["N", "AH"]],
+        stress_pattern="010",
+    )
+
+    assert aligner._dictionary_phones(entry) == ["B", "AH0", "N", "AE1", "N", "AH0"]
