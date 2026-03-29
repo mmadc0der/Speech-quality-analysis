@@ -29,6 +29,10 @@ class ResponseMapper:
             rms=prepared_audio.rms,
             clipping_ratio=prepared_audio.clipping_ratio,
             silence_ratio=prepared_audio.silence_ratio,
+            original_duration_ms=prepared_audio.original_duration_ms,
+            trim_start_ms=prepared_audio.trim_start_ms,
+            trim_end_ms=prepared_audio.trim_end_ms,
+            trim_applied=prepared_audio.trim_applied,
         )
 
     def build_response(
@@ -43,7 +47,11 @@ class ResponseMapper:
         audio_quality = self.build_audio_quality(prepared_audio)
         confidence_multiplier = {"ok": 1.0, "low_confidence": 0.9, "rejected": 0.75}[audio_quality.status]
         phone_payloads = [
-            self._build_phone_payload(prediction, confidence_multiplier=confidence_multiplier)
+            self._build_phone_payload(
+                prediction,
+                trim_start_ms=prepared_audio.trim_start_ms,
+                confidence_multiplier=confidence_multiplier,
+            )
             for prediction in runtime_result.phone_predictions
         ]
         overall_score = self._overall_score(runtime_result.phone_predictions)
@@ -73,6 +81,7 @@ class ResponseMapper:
         self,
         prediction: ScorerPhonePrediction,
         *,
+        trim_start_ms: int,
         confidence_multiplier: float,
     ) -> PronunciationPhonePayload:
         class_confidence = prediction.quality_class_probs[prediction.predicted_class]
@@ -83,8 +92,8 @@ class ResponseMapper:
         )
         return PronunciationPhonePayload(
             phoneme=prediction.phoneme,
-            start_ms=prediction.start_ms,
-            end_ms=prediction.end_ms,
+            start_ms=prediction.start_ms + trim_start_ms,
+            end_ms=prediction.end_ms + trim_start_ms,
             expected_score=round(prediction.expected_score, 3),
             expected_human_score=round(prediction.expected_human_score, 3),
             omission_probability=round(prediction.omission_probability, 6),

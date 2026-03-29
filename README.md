@@ -49,7 +49,7 @@ For the first training-launch milestone, see `docs/feature_precompute_pipeline.m
 
 For dataset handling, see `docs/dataset_ingestion.md`. The project now follows a preload-first `raw -> prepared -> aligned -> features` pipeline, starting with a persistent `LibriTTS` prepared-manifest builder.
 
-## Run
+## Run Backend
 
 ```bash
 pip install -e .[dev]
@@ -64,6 +64,42 @@ pip install -e .[ml]
 
 Set `PRONUNCIATION_BACKBONE_ID` to a compatible checkpoint such as a HuBERT or Wav2Vec2 model. By default the service stays on the lightweight fallback path until a model is available.
 
+For the current `scorer_v2` serving path, set the runtime env vars before launch:
+
+```bash
+export PRONUNCIATION_USE_HF_ENCODER=1
+export PRONUNCIATION_SCORER_CHECKPOINT_PATH=/path/to/scorer_v2_best.pt
+export PRONUNCIATION_SCORER_DEVICE=cuda
+uvicorn pronunciation_backend.main:app --host 0.0.0.0 --port 8000
+```
+
+## Run Lightweight Frontend
+
+Run the debug frontend locally on your workstation and point it at a remote backend:
+
+```bash
+python -m pronunciation_backend.frontend --backend-url http://your-server:8000 --port 3000
+```
+
+Or use environment variables:
+
+```bash
+export PRONUNCIATION_FRONTEND_BACKEND_URL=http://your-server:8000
+export PRONUNCIATION_FRONTEND_PORT=3000
+python -m pronunciation_backend.frontend
+```
+
+Then open `http://127.0.0.1:3000`.
+
+The frontend proxies requests through the local app, so the browser does not need direct CORS access to the remote backend.
+
+The debug UI now supports two trim modes for manual verification:
+
+- backend auto-trim: default path; the server detects the likely spoken-word window before scoring
+- frontend manual trim: optional local crop by start/end milliseconds before upload
+
+If you enable frontend manual trim and want to prevent the server from re-trimming the already cropped clip, enable the UI option that sends `noTrim=true`.
+
 ## API
 
 `POST /v1/pronunciation/score`
@@ -73,6 +109,7 @@ Multipart form fields:
 - `word`: target word displayed to the learner
 - `audio`: mono recording file
 - `speaker_id`: optional
+- `noTrim`: optional boolean flag that skips backend auto-trim
 
 The response returns:
 

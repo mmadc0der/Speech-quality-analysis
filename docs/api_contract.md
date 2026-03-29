@@ -11,6 +11,7 @@ Multipart form data:
 - `word`: required target word from the curated `en-US` lexicon
 - `audio`: required mono recording file
 - `speaker_id`: optional reserved field for future personalization
+- `noTrim`: optional boolean flag; when `true`, backend auto-trim is skipped and the uploaded clip is scored as-is
 
 ## Response
 
@@ -27,7 +28,11 @@ Multipart form data:
     "duration_ms": 620,
     "rms": 0.21,
     "clipping_ratio": 0.0,
-    "silence_ratio": 0.16
+    "silence_ratio": 0.16,
+    "original_duration_ms": 1480,
+    "trim_start_ms": 430,
+    "trim_end_ms": 1050,
+    "trim_applied": true
   },
   "phonemes": [
     {
@@ -77,6 +82,17 @@ Multipart form data:
 - `omission_probability`: separate omission head output after sigmoid
 - `confidence`: API-facing confidence that blends model certainty with alignment confidence
 - `alignment_confidence`: heuristic alignment confidence from the runtime aligner
+- phone times remain relative to the original uploaded clip even when backend trimming is applied
+
+## Trimming Semantics
+
+- by default the backend runs a lightweight word-region detector over the uploaded clip before encoding
+- detection uses short-time RMS energy, merges tiny inactive gaps, picks the strongest contiguous speech region, and pads both sides slightly
+- `audio_quality.duration_ms` is the duration that was actually scored after trimming
+- `audio_quality.original_duration_ms` is the full uploaded clip duration before trimming
+- `audio_quality.trim_start_ms` and `audio_quality.trim_end_ms` mark the scored window within the original clip
+- `audio_quality.trim_applied=false` means the backend kept the original clip unchanged
+- set `noTrim=true` when the client already trimmed the clip and wants to bypass backend auto-trim
 
 `primary_issue.type` is derived from the worst-scoring phoneme and can be one of:
 

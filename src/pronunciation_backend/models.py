@@ -14,6 +14,10 @@ class AudioQualityPayload(BaseModel):
     rms: float = Field(ge=0)
     clipping_ratio: float = Field(ge=0, le=1)
     silence_ratio: float = Field(ge=0, le=1)
+    original_duration_ms: int = Field(ge=0)
+    trim_start_ms: int = Field(ge=0)
+    trim_end_ms: int = Field(ge=0)
+    trim_applied: bool = False
 
 
 class PhonemeAssessmentPayload(BaseModel):
@@ -108,6 +112,10 @@ class PreparedAudio:
     silence_ratio: float
     snr_estimate: float
     quality_status: str
+    original_duration_ms: int
+    trim_start_ms: int = 0
+    trim_end_ms: int = 0
+    trim_applied: bool = False
 
 
 @dataclass(frozen=True)

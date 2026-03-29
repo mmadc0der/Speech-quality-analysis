@@ -29,17 +29,22 @@ class _FakeReferenceAudioService:
 
 @dataclass
 class _FakeAudioPrepService:
-    def decode(self, audio_bytes: bytes) -> PreparedAudio:
+    def decode(self, audio_bytes: bytes, *, enable_trim: bool = True) -> PreparedAudio:
         assert audio_bytes == b"audio"
+        assert enable_trim is True
         return PreparedAudio(
             samples=np.zeros((16_000,), dtype=np.float32),
             sample_rate=16_000,
-            duration_ms=1000,
+            duration_ms=500,
             rms=0.2,
             clipping_ratio=0.0,
             silence_ratio=0.1,
             snr_estimate=25.0,
             quality_status="ok",
+            original_duration_ms=1000,
+            trim_start_ms=500,
+            trim_end_ms=1000,
+            trim_applied=True,
         )
 
 
@@ -144,5 +149,8 @@ def test_pipeline_uses_runtime_and_response_mapper() -> None:
     assert response.model_info.runtime_backend == "scorer_v2"
     assert response.primary_issue.phoneme == "TH"
     assert len(response.phonemes) == 3
+    assert response.audio_quality.trim_applied is True
+    assert response.phonemes[0].start_ms == 500
+    assert response.phonemes[0].end_ms == 560
     assert scorer_runtime.seen_features is not None
     assert [feature.phoneme for feature in scorer_runtime.seen_features] == ["TH", "AO", "T"]

@@ -23,9 +23,9 @@ class PronunciationPipeline:
     scorer_runtime: ScorerRuntime
     response_mapper: ResponseMapper
 
-    def assess_word(self, word: str, audio_bytes: bytes) -> PronunciationAssessmentResponse:
+    def assess_word(self, word: str, audio_bytes: bytes, *, no_trim: bool = False) -> PronunciationAssessmentResponse:
         entry = self.lexicon_service.get_word(word)
-        prepared = self.audio_prep_service.decode(audio_bytes)
+        prepared = self.audio_prep_service.decode(audio_bytes, enable_trim=not no_trim)
         encoded = self.feature_encoder.encode(prepared)
         spans = self.aligner.align(entry, encoded)
         phone_features = self.feature_builder.build(encoded, spans)

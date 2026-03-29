@@ -30,6 +30,7 @@ class _FakeLexiconService:
 @dataclass
 class _FakePipeline:
     lexicon_service: _FakeLexiconService
+    last_no_trim: bool | None = None
 
     def model_info(self) -> ScorerModelInfo:
         return ScorerModelInfo(
@@ -41,8 +42,9 @@ class _FakePipeline:
             class_labels=("wrong_or_missed", "accented", "correct"),
         )
 
-    def assess_word(self, word: str, audio_bytes: bytes) -> PronunciationAssessmentResponse:
+    def assess_word(self, word: str, audio_bytes: bytes, *, no_trim: bool = False) -> PronunciationAssessmentResponse:
         assert audio_bytes
+        self.last_no_trim = no_trim
         return PronunciationAssessmentResponse(
             word=word,
             ipa="θɔt",
@@ -55,6 +57,10 @@ class _FakePipeline:
                 rms=0.2,
                 clipping_ratio=0.0,
                 silence_ratio=0.1,
+                original_duration_ms=700,
+                trim_start_ms=0,
+                trim_end_ms=700,
+                trim_applied=False,
             ),
             phonemes=[
                 PronunciationPhonePayload(
@@ -174,3 +180,15 @@ def test_score_pronunciation(client: TestClient) -> None:
     assert len(payload["phonemes"]) == 3
     assert payload["phonemes"][0]["predicted_class"] == "accented"
     assert payload["model_info"]["runtime_backend"] == "scorer_v2"
+    assert payload["audio_quality"]["trim_applied"] is False
+
+
+def test_score_pronunciation_forwards_no_trim(client: TestClient) -> None:
+    pipeline = client.app.state.pipeline
+    response = client.post(
+        "/v1/pronunciation/score",
+        data={"word": "thought", "noTrim": "true"},
+        files={"audio": ("sample.wav", _sine_wave_bytes(), "audio/wav")},
+    )
+    assert response.status_code == 200
+    assert pipeline.last_no_trim is True

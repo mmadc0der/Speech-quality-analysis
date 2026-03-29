@@ -84,11 +84,12 @@ def create_app(
         word: str = Form(...),
         audio: UploadFile = File(...),
         speaker_id: str | None = Form(default=None),
+        no_trim: bool = Form(default=False, alias="noTrim"),
     ) -> PronunciationAssessmentResponse:
         del speaker_id  # reserved for future personalization
         try:
             audio_bytes = await audio.read()
-            return get_pipeline_from_request(request).assess_word(word=word, audio_bytes=audio_bytes)
+            return get_pipeline_from_request(request).assess_word(word=word, audio_bytes=audio_bytes, no_trim=no_trim)
         except UnknownWordError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except AudioValidationError as exc:
