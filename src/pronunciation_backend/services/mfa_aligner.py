@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import shlex
 import subprocess
@@ -17,6 +18,7 @@ from pronunciation_backend.training.textgrid_utils import Interval, parse_textgr
 
 SKIP_PHONE_LABELS = {"", "sp", "sil", "spn", "<eps>"}
 MFA_ALIGNMENT_CONFIDENCE = 0.92
+logger = logging.getLogger(__name__)
 
 
 class AlignmentError(RuntimeError):
@@ -56,8 +58,9 @@ class MfaForcedAligner:
             base_dir = Path(temp_dir)
             corpus_dir = base_dir / "corpus"
             output_dir = base_dir / "output"
+            temp_mfa_dir = base_dir / "mfa_temp"
             corpus_dir.mkdir(parents=True, exist_ok=True)
-            output_dir.mkdir(parents=True, exist_ok=True)
+            temp_mfa_dir.mkdir(parents=True, exist_ok=True)
 
             stem = "utterance"
             wav_path = corpus_dir / f"{stem}.wav"
@@ -74,8 +77,17 @@ class MfaForcedAligner:
                 dictionary_path=dict_path,
                 acoustic_model=acoustic_model,
                 output_dir=output_dir,
+                temp_mfa_dir=temp_mfa_dir,
             )
             if process.returncode != 0:
+                logger.error(
+                    "MFA alignment subprocess failed",
+                    extra={
+                        "returncode": process.returncode,
+                        "stdout": process.stdout,
+                        "stderr": process.stderr,
+                    },
+                )
                 raise AlignmentExecutionError(
                     "MFA alignment failed "
                     f"(exit_code={process.returncode}): {self._format_process_output(process.stdout, process.stderr)}"
@@ -116,9 +128,15 @@ class MfaForcedAligner:
         dictionary_path: Path,
         acoustic_model: str,
         output_dir: Path,
+        temp_mfa_dir: Path,
     ) -> subprocess.CompletedProcess[str]:
         args = command_argv + [
             "align",
+            "--clean",
+            "--temporary_directory",
+            str(temp_mfa_dir),
+            "--output_format",
+            "short_textgrid",
             str(corpus_dir),
             str(dictionary_path),
             acoustic_model,

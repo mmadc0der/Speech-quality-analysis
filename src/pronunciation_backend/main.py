@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -15,6 +16,8 @@ from pronunciation_backend.services.pipeline import PronunciationPipeline
 from pronunciation_backend.services.reference import ReferenceAudioService
 from pronunciation_backend.services.response_mapper import ResponseMapper
 from pronunciation_backend.services.scorer_v2_runtime import ScorerV2Runtime
+
+logger = logging.getLogger(__name__)
 
 
 def build_pipeline(active_settings: Settings) -> PronunciationPipeline:
@@ -103,6 +106,7 @@ def create_app(
         except AudioValidationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except AlignmentError as exc:
+            logger.exception("Alignment failed during pronunciation scoring")
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except FileNotFoundError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc

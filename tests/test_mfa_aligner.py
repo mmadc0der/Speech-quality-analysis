@@ -129,19 +129,26 @@ item []:
     def _fake_run(args, capture_output, text, timeout, check, env):  # type: ignore[no-untyped-def]
         assert args[:5] == ["micromamba", "run", "-n", "mfa", "mfa"]
         assert args[5] == "align"
+        assert args[6] == "--clean"
+        assert args[7] == "--temporary_directory"
         assert capture_output is True
         assert text is True
         assert timeout == 5.0
         assert check is False
         assert isinstance(env, dict)
 
-        corpus_dir = Path(args[6])
-        dict_path = Path(args[7])
-        assert args[8] == "english_us_arpa"
-        output_dir = Path(args[9])
+        assert args[8].endswith("mfa_temp")
+        assert args[9] == "--output_format"
+        assert args[10] == "short_textgrid"
+        corpus_dir = Path(args[11])
+        dict_path = Path(args[12])
+        assert args[13] == "english_us_arpa"
+        output_dir = Path(args[14])
+        temp_mfa_dir = Path(args[8])
 
         assert (corpus_dir / "utterance.lab").read_text(encoding="utf-8").strip() == "cat"
         assert "cat K AE T" in dict_path.read_text(encoding="utf-8")
+        assert temp_mfa_dir.name == "mfa_temp"
 
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "utterance.TextGrid").write_text(textgrid, encoding="utf-8")
