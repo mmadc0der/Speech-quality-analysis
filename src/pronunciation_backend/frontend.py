@@ -266,6 +266,69 @@ INDEX_HTML = """<!doctype html>
       font-size: 0.9rem;
       line-height: 1.45;
     }
+
+    .viz-shell {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: rgba(12, 18, 32, 0.92);
+      padding: 12px;
+    }
+
+    .viz-header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .viz-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .viz-legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .viz-chip {
+      width: 14px;
+      height: 4px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+
+    .viz-chip.levels {
+      background: linear-gradient(90deg, rgba(125, 211, 252, 0.4), rgba(56, 189, 248, 1));
+    }
+
+    .viz-chip.frontend {
+      background: #22d3ee;
+    }
+
+    .viz-chip.backend {
+      background: #f59e0b;
+    }
+
+    .viz-chip.phone {
+      background: #c084fc;
+    }
+
+    #clipVizCanvas {
+      width: 100%;
+      height: 220px;
+      display: block;
+      border-radius: 10px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+        #0b1120;
+    }
   </style>
 </head>
 <body>
@@ -362,6 +425,22 @@ INDEX_HTML = """<!doctype html>
     </section>
 
     <section class="panel stack">
+      <h2>Clip Visualization</h2>
+      <div class="viz-shell">
+        <div class="viz-header">
+          <div id="clipVizStatus" class="footer-note">Select or record audio to inspect the clip envelope.</div>
+          <div class="viz-legend">
+            <span><i class="viz-chip levels"></i>Volume envelope</span>
+            <span><i class="viz-chip frontend"></i>Frontend trim</span>
+            <span><i class="viz-chip backend"></i>Backend trim</span>
+            <span><i class="viz-chip phone"></i>Phone borders</span>
+          </div>
+        </div>
+        <canvas id="clipVizCanvas" width="960" height="220"></canvas>
+      </div>
+    </section>
+
+    <section class="panel stack">
       <h2>Per-Phone Detail</h2>
       <table>
         <thead>
@@ -402,6 +481,12 @@ INDEX_HTML = """<!doctype html>
       recordingStartedAt: 0,
       recordingBlob: null,
       recordingFileName: "recording.wav",
+      clipSamples: null,
+      clipSampleRate: 0,
+      clipDurationMs: 0,
+      clipSourceLabel: "",
+      lastScoringResult: null,
+      lastUploadContext: null,
     };
 
     const backendUrlEl = document.getElementById("backendUrl");
@@ -425,6 +510,8 @@ INDEX_HTML = """<!doctype html>
     const scoreButtonEl = document.getElementById("scoreButton");
     const requestStatusEl = document.getElementById("requestStatus");
     const summaryGridEl = document.getElementById("summaryGrid");
+    const clipVizStatusEl = document.getElementById("clipVizStatus");
+    const clipVizCanvasEl = document.getElementById("clipVizCanvas");
     const phoneRowsEl = document.getElementById("phoneRows");
     const rawJsonEl = document.getElementById("rawJson");
     const copyRawJsonButtonEl = document.getElementById("copyRawJsonButton");
@@ -518,6 +605,257 @@ INDEX_HTML = """<!doctype html>
         return fallback;
       }
       return Math.round(numeric);
+    }
+
+    function summarizeEnvelope(samples, bins = 180) {
+      if (!samples || samples.length === 0) {
+        return [];
+      }
+      const step = Math.max(1, Math.ceil(samples.length / bins));
+      const envelope = [];
+      for (let start = 0; start < samples.length; start += step) {
+        const end = Math.min(samples.length, start + step);
+        let sum = 0;
+        for (let index = start; index < end; index += 1) {
+          sum += Math.abs(samples[index]);
+        }
+        envelope.push(sum / Math.max(1, end - start));
+      }
+      const peak = envelope.reduce((maxValue, value) => Math.max(maxValue, value), 0);
+      if (peak <= 0) {
+        return envelope.map(() => 0);
+      }
+      return envelope.map((value) => value / peak);
+    }
+
+    function currentFrontendTrimWindow() {
+      if (!frontendTrimEnabledEl.checked || !state.clipDurationMs) {
+        return null;
+      }
+      const startMs = Math.max(0, Math.min(state.clipDurationMs, parseTrimBound(trimStartMsEl.value, 0)));
+      const rawEnd = trimEndMsEl.value.trim();
+      const endMs = rawEnd
+        ? Math.max(0, Math.min(state.clipDurationMs, parseTrimBound(rawEnd, state.clipDurationMs)))
+        : state.clipDurationMs;
+      if (endMs <= startMs) {
+        return null;
+      }
+      return { startMs, endMs };
+    }
+
+    function backendTrimWindowInOriginalTimeline() {
+      const result = state.lastScoringResult;
+      if (!result || !result.audio_quality || !result.audio_quality.trim_applied) {
+        return null;
+      }
+      const audioQuality = result.audio_quality;
+      let startMs = Number(audioQuality.trim_start_ms || 0);
+      let endMs = Number(audioQuality.trim_end_ms || 0);
+      const uploadContext = state.lastUploadContext;
+      if (uploadContext && uploadContext.frontendTrimApplied) {
+        startMs += uploadContext.frontendTrimStartMs;
+        endMs += uploadContext.frontendTrimStartMs;
+      }
+      return { startMs, endMs };
+    }
+
+    function detectedPhonesInOriginalTimeline() {
+      const result = state.lastScoringResult;
+      if (!result || !Array.isArray(result.phonemes)) {
+        return [];
+      }
+      const uploadContext = state.lastUploadContext;
+      const offsetMs = uploadContext && uploadContext.frontendTrimApplied
+        ? uploadContext.frontendTrimStartMs
+        : 0;
+      return result.phonemes.map((phone) => ({
+        phoneme: phone.phoneme,
+        startMs: Number(phone.start_ms || 0) + offsetMs,
+        endMs: Number(phone.end_ms || 0) + offsetMs,
+      }));
+    }
+
+    function drawClipVisualization() {
+      const canvas = clipVizCanvasEl;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        return;
+      }
+
+      const cssWidth = canvas.clientWidth || 960;
+      const cssHeight = canvas.clientHeight || 220;
+      const ratio = window.devicePixelRatio || 1;
+      const pixelWidth = Math.max(1, Math.round(cssWidth * ratio));
+      const pixelHeight = Math.max(1, Math.round(cssHeight * ratio));
+      if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+        canvas.width = pixelWidth;
+        canvas.height = pixelHeight;
+      }
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.scale(ratio, ratio);
+
+      context.clearRect(0, 0, cssWidth, cssHeight);
+      context.fillStyle = "#0b1120";
+      context.fillRect(0, 0, cssWidth, cssHeight);
+
+      const padding = { top: 16, right: 16, bottom: 34, left: 16 };
+      const plotWidth = cssWidth - padding.left - padding.right;
+      const plotHeight = cssHeight - padding.top - padding.bottom;
+
+      context.strokeStyle = "rgba(148, 163, 184, 0.18)";
+      context.lineWidth = 1;
+      for (let tick = 0; tick <= 4; tick += 1) {
+        const y = padding.top + (plotHeight * tick) / 4;
+        context.beginPath();
+        context.moveTo(padding.left, y);
+        context.lineTo(padding.left + plotWidth, y);
+        context.stroke();
+      }
+
+      if (!state.clipSamples || !state.clipDurationMs) {
+        context.fillStyle = "#94a7c6";
+        context.font = "14px Segoe UI";
+        context.fillText("No clip loaded yet.", padding.left, padding.top + 22);
+        return;
+      }
+
+      const frontendWindow = currentFrontendTrimWindow();
+      const backendWindow = backendTrimWindowInOriginalTimeline();
+      const detectedPhones = detectedPhonesInOriginalTimeline();
+
+      function xForMs(valueMs) {
+        return padding.left + (Math.max(0, Math.min(state.clipDurationMs, valueMs)) / state.clipDurationMs) * plotWidth;
+      }
+
+      if (backendWindow) {
+        const startX = xForMs(backendWindow.startMs);
+        const endX = xForMs(backendWindow.endMs);
+        context.fillStyle = "rgba(245, 158, 11, 0.14)";
+        context.fillRect(startX, padding.top, Math.max(2, endX - startX), plotHeight);
+      }
+
+      const envelope = summarizeEnvelope(state.clipSamples);
+      const barWidth = Math.max(1, plotWidth / Math.max(1, envelope.length));
+      for (let index = 0; index < envelope.length; index += 1) {
+        const value = envelope[index];
+        const height = Math.max(1, value * (plotHeight - 6));
+        const x = padding.left + index * barWidth;
+        const y = padding.top + plotHeight - height;
+        context.fillStyle = value > 0.75 ? "rgba(125, 211, 252, 1)" : "rgba(56, 189, 248, 0.8)";
+        context.fillRect(x, y, Math.max(1, barWidth - 1), height);
+      }
+
+      function drawWindow(window, color, dash = []) {
+        if (!window) {
+          return;
+        }
+        const startX = xForMs(window.startMs);
+        const endX = xForMs(window.endMs);
+        context.save();
+        context.setLineDash(dash);
+        context.strokeStyle = color;
+        context.lineWidth = 2;
+        context.beginPath();
+        context.moveTo(startX, padding.top);
+        context.lineTo(startX, padding.top + plotHeight);
+        context.moveTo(endX, padding.top);
+        context.lineTo(endX, padding.top + plotHeight);
+        context.stroke();
+        context.restore();
+      }
+
+      drawWindow(frontendWindow, "#22d3ee", [6, 5]);
+      drawWindow(backendWindow, "#f59e0b");
+
+      if (detectedPhones.length > 0) {
+        context.save();
+        context.strokeStyle = "#c084fc";
+        context.fillStyle = "#e9d5ff";
+        context.lineWidth = 1.5;
+        context.font = "11px Segoe UI";
+        let previousLabelRight = -Infinity;
+        detectedPhones.forEach((phone, index) => {
+          const startX = xForMs(phone.startMs);
+          const endX = xForMs(phone.endMs);
+
+          context.beginPath();
+          context.moveTo(startX, padding.top);
+          context.lineTo(startX, padding.top + plotHeight);
+          context.stroke();
+
+          if (index === detectedPhones.length - 1) {
+            context.beginPath();
+            context.moveTo(endX, padding.top);
+            context.lineTo(endX, padding.top + plotHeight);
+            context.stroke();
+          }
+
+          const centerX = (startX + endX) / 2;
+          const labelWidth = context.measureText(phone.phoneme).width;
+          let labelX = centerX - (labelWidth / 2);
+          const minX = padding.left;
+          const maxX = padding.left + plotWidth - labelWidth;
+          labelX = Math.max(minX, Math.min(maxX, labelX));
+          if (labelX < previousLabelRight + 4) {
+            labelX = Math.min(maxX, previousLabelRight + 4);
+          }
+          if (labelX + labelWidth <= padding.left + plotWidth) {
+            context.fillText(phone.phoneme, labelX, padding.top + 12);
+            previousLabelRight = labelX + labelWidth;
+          }
+        });
+        context.restore();
+      }
+
+      context.fillStyle = "#94a7c6";
+      context.font = "12px Segoe UI";
+      context.textAlign = "center";
+      for (let tick = 0; tick <= 4; tick += 1) {
+        const x = padding.left + (plotWidth * tick) / 4;
+        const ms = Math.round((state.clipDurationMs * tick) / 4);
+        context.fillText(`${ms} ms`, x, cssHeight - 10);
+      }
+      context.textAlign = "left";
+    }
+
+    function refreshClipVizStatus() {
+      if (!state.clipDurationMs) {
+        clipVizStatusEl.textContent = "Select or record audio to inspect the clip envelope.";
+        clipVizStatusEl.className = "footer-note";
+        return;
+      }
+      const frontendWindow = currentFrontendTrimWindow();
+      const backendWindow = backendTrimWindowInOriginalTimeline();
+      const detectedPhones = detectedPhonesInOriginalTimeline();
+      const parts = [
+        `${state.clipSourceLabel || "clip"}: ${Math.round(state.clipDurationMs)} ms`,
+      ];
+      if (frontendWindow) {
+        parts.push(`frontend trim ${Math.round(frontendWindow.startMs)}-${Math.round(frontendWindow.endMs)} ms`);
+      }
+      if (backendWindow) {
+        parts.push(`backend trim ${Math.round(backendWindow.startMs)}-${Math.round(backendWindow.endMs)} ms`);
+      }
+      if (detectedPhones.length > 0) {
+        parts.push(`${detectedPhones.length} phones`);
+      }
+      clipVizStatusEl.textContent = parts.join(" | ");
+      clipVizStatusEl.className = "footer-note";
+    }
+
+    function updateClipVisualization() {
+      refreshClipVizStatus();
+      drawClipVisualization();
+    }
+
+    async function loadClipVisualization(file, sourceLabel) {
+      const decoded = await decodeAudioFile(file);
+      state.clipSamples = decoded.samples;
+      state.clipSampleRate = decoded.sampleRate;
+      state.clipDurationMs = (decoded.samples.length / decoded.sampleRate) * 1000;
+      state.clipSourceLabel = sourceLabel;
+      state.lastScoringResult = null;
+      updateClipVisualization();
     }
 
     function encodeWav(samples, sampleRate) {
@@ -668,6 +1006,10 @@ INDEX_HTML = """<!doctype html>
       state.recordingBlob = encodeWav(merged, sampleRate);
       audioPreviewEl.src = URL.createObjectURL(state.recordingBlob);
       audioPreviewEl.classList.remove("hidden");
+      await loadClipVisualization(
+        new File([state.recordingBlob], state.recordingFileName, { type: "audio/wav" }),
+        "recorded clip",
+      );
 
       state.audioContext = null;
       state.sourceNode = null;
@@ -694,6 +1036,13 @@ INDEX_HTML = """<!doctype html>
       recordingTimerEl.textContent = "0.0s";
       audioStatusEl.textContent = "No audio selected.";
       audioStatusEl.className = "footer-note";
+      state.clipSamples = null;
+      state.clipSampleRate = 0;
+      state.clipDurationMs = 0;
+      state.clipSourceLabel = "";
+      state.lastScoringResult = null;
+      state.lastUploadContext = null;
+      updateClipVisualization();
     }
 
     async function selectedAudioFile() {
@@ -706,7 +1055,13 @@ INDEX_HTML = """<!doctype html>
       if (!file) {
         return null;
       }
-      if (!frontendTrimEnabledEl.checked) {
+      const frontendWindow = currentFrontendTrimWindow();
+      state.lastUploadContext = {
+        frontendTrimApplied: Boolean(frontendWindow),
+        frontendTrimStartMs: frontendWindow ? frontendWindow.startMs : 0,
+        frontendTrimEndMs: frontendWindow ? frontendWindow.endMs : state.clipDurationMs,
+      };
+      if (!frontendWindow) {
         return file;
       }
       return buildTrimmedAudioFile(file);
@@ -758,11 +1113,13 @@ INDEX_HTML = """<!doctype html>
     }
 
     function renderResult(result) {
+      state.lastScoringResult = result;
       renderSummary(result);
       renderPhones(result);
       rawJsonEl.textContent = JSON.stringify(result, null, 2);
       copyRawJsonStatusEl.textContent = "Ready to copy.";
       copyRawJsonStatusEl.className = "footer-note";
+      updateClipVisualization();
     }
 
     async function copyRawJson() {
@@ -832,20 +1189,31 @@ INDEX_HTML = """<!doctype html>
     clearButtonEl.addEventListener("click", clearAudio);
     scoreButtonEl.addEventListener("click", submitForScoring);
     copyRawJsonButtonEl.addEventListener("click", copyRawJson);
-    fileInputEl.addEventListener("change", () => {
+    fileInputEl.addEventListener("change", async () => {
       if (fileInputEl.files && fileInputEl.files.length > 0) {
         const selected = fileInputEl.files[0];
         audioPreviewEl.src = URL.createObjectURL(selected);
         audioPreviewEl.classList.remove("hidden");
         audioStatusEl.textContent = `Selected file ${selected.name}.`;
         audioStatusEl.className = "footer-note status-ok";
+        try {
+          await loadClipVisualization(selected, `selected file ${selected.name}`);
+        } catch (error) {
+          audioStatusEl.textContent = `Unable to visualize audio: ${error.message}`;
+          audioStatusEl.className = "footer-note status-bad";
+        }
       }
     });
+    frontendTrimEnabledEl.addEventListener("change", updateClipVisualization);
+    trimStartMsEl.addEventListener("input", updateClipVisualization);
+    trimEndMsEl.addEventListener("input", updateClipVisualization);
+    window.addEventListener("resize", drawClipVisualization);
 
     loadConfig().then(pingBackend).then(loadWords).catch((error) => {
       backendStatusEl.textContent = `Initialization failed: ${error.message}`;
       backendStatusEl.className = "footer-note status-bad";
     });
+    updateClipVisualization();
   </script>
 </body>
 </html>
