@@ -18,6 +18,14 @@ def _optional_env_path(name: str) -> Path | None:
     return Path(value) if value else None
 
 
+def _optional_env_value(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
 @dataclass(frozen=True)
 class Settings:
     sample_rate: int = 16_000
@@ -29,9 +37,19 @@ class Settings:
     backbone_id: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_BACKBONE_ID", "facebook/hubert-base-ls960"))
     device: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_DEVICE", "cpu"))
     runtime_backend: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_RUNTIME_BACKEND", "scorer_v2"))
+    aligner_backend: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_ALIGNER_BACKEND", "mfa"))
     scorer_device: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_SCORER_DEVICE", os.getenv("PRONUNCIATION_DEVICE", "cpu")))
     scorer_strict_load: bool = field(default_factory=lambda: _env_flag("PRONUNCIATION_SCORER_STRICT_LOAD", "1"))
     scorer_checkpoint_path: Path | None = field(default_factory=lambda: _optional_env_path("PRONUNCIATION_SCORER_CHECKPOINT_PATH"))
+    mfa_command: str | None = field(default_factory=lambda: _optional_env_value("PRONUNCIATION_MFA_COMMAND"))
+    mfa_acoustic_model: str | None = field(default_factory=lambda: _optional_env_value("PRONUNCIATION_MFA_ACOUSTIC_MODEL"))
+    mfa_work_root: Path = field(
+        default_factory=lambda: _env_path(
+            "PRONUNCIATION_MFA_WORK_ROOT",
+            os.getenv("PRONUNCIATION_STORAGE_ROOT", "/cold/pronunciation") + "/runtime/mfa",
+        )
+    )
+    mfa_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("PRONUNCIATION_MFA_TIMEOUT_SECONDS", "30")))
     storage_root: Path = field(default_factory=lambda: _env_path("PRONUNCIATION_STORAGE_ROOT", "/cold/pronunciation"))
     hf_home: Path = field(default_factory=lambda: _env_path("HF_HOME", "/cold/huggingface"))
     dataset_root: Path = field(default_factory=lambda: _env_path("PRONUNCIATION_DATASET_ROOT", os.getenv("PRONUNCIATION_STORAGE_ROOT", "/cold/pronunciation") + "/datasets"))
@@ -44,6 +62,8 @@ class Settings:
     def validate_runtime(self) -> None:
         if self.runtime_backend != "scorer_v2":
             raise ValueError(f"Unsupported runtime backend: {self.runtime_backend}")
+        if self.aligner_backend != "mfa":
+            raise ValueError(f"Unsupported aligner backend: {self.aligner_backend}")
         if self.scorer_checkpoint_path is None:
             raise ValueError("PRONUNCIATION_SCORER_CHECKPOINT_PATH must be set for scorer_v2 serving")
         if not self.scorer_checkpoint_path.exists():

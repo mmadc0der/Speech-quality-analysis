@@ -18,6 +18,7 @@ from pronunciation_backend.models import (
     QualityClassProbabilitiesPayload,
     ReferencePayload,
 )
+from pronunciation_backend.services.mfa_aligner import AlignmentUnavailableError
 from pronunciation_backend.services.scorer_runtime import ScorerModelInfo
 
 
@@ -192,3 +193,21 @@ def test_score_pronunciation_forwards_no_trim(client: TestClient) -> None:
     )
     assert response.status_code == 200
     assert pipeline.last_no_trim is True
+
+
+def test_score_pronunciation_returns_503_for_alignment_failure() -> None:
+    @dataclass
+    class _FailingPipeline(_FakePipeline):
+        def assess_word(self, word: str, audio_bytes: bytes, *, no_trim: bool = False) -> PronunciationAssessmentResponse:
+            del word, audio_bytes, no_trim
+            raise AlignmentUnavailableError("MFA aligner is not configured")
+
+    with TestClient(create_app(pipeline_override=_FailingPipeline(lexicon_service=_FakeLexiconService()))) as client:
+        response = client.post(
+            "/v1/pronunciation/score",
+            data={"word": "thought"},
+            files={"audio": ("sample.wav", _sine_wave_bytes(), "audio/wav")},
+        )
+
+    assert response.status_code == 503
+    assert "MFA aligner" in response.json()["detail"]

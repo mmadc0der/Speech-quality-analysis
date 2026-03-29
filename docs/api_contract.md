@@ -81,13 +81,14 @@ Multipart form data:
 - `quality_class_probs`: class probabilities for `wrong_or_missed`, `accented`, and `correct`
 - `omission_probability`: separate omission head output after sigmoid
 - `confidence`: API-facing confidence that blends model certainty with alignment confidence
-- `alignment_confidence`: heuristic alignment confidence from the runtime aligner
+- `alignment_confidence`: MFA-derived alignment confidence from the runtime aligner
 - phone times remain relative to the original uploaded clip even when backend trimming is applied
 
 ## Trimming Semantics
 
 - by default the backend runs a lightweight word-region detector over the uploaded clip before encoding
 - detection uses short-time RMS energy, merges tiny inactive gaps, picks the strongest contiguous speech region, and pads both sides slightly
+- the trimmed clip is then aligned with MFA using the known target word transcript before phoneme features are pooled for the scorer
 - `audio_quality.duration_ms` is the duration that was actually scored after trimming
 - `audio_quality.original_duration_ms` is the full uploaded clip duration before trimming
 - `audio_quality.trim_start_ms` and `audio_quality.trim_end_ms` mark the scored window within the original clip
@@ -106,6 +107,20 @@ Multipart form data:
 
 - `404`: target word is not in the curated MVP lexicon
 - `400`: audio is empty, invalid, too short, or too long
+- `503`: MFA is unavailable, times out, or fails to produce a usable alignment for the request
+
+## Runtime Setup
+
+The scoring backend stays inside the project `uv` environment and launches MFA through an explicit external command so it does not compete with the app environment.
+
+Example:
+
+```bash
+export PRONUNCIATION_MFA_COMMAND="/opt/micromamba/bin/micromamba run -n mfa mfa"
+export PRONUNCIATION_MFA_ACOUSTIC_MODEL=english_us_arpa
+```
+
+`PRONUNCIATION_MFA_COMMAND` should resolve to the `mfa` executable or to a launcher that ends by invoking `mfa`. The backend appends `align` and the request-specific corpus, dictionary, model, and output arguments automatically.
 
 ## Confidence Policy
 

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
 
 import numpy as np
 
-from pronunciation_backend.models import EncodedFrames, LexiconEntry, PhoneFeatures, PhoneSpan
+from pronunciation_backend.models import EncodedFrames, LexiconEntry, PhoneFeatures, PhoneSpan, PreparedAudio
 
 VOWELS = {"AA", "AE", "AH", "AO", "AW", "AY", "EH", "ER", "EY", "IH", "IY", "OW", "OY", "UH", "UW"}
 FRICATIVES = {"DH", "F", "S", "SH", "TH", "V", "Z", "ZH", "HH"}
@@ -35,7 +36,8 @@ def phone_duration_weight(phone: str) -> float:
 class ConstrainedPhonemeAligner:
     """Heuristic aligner that partitions frames over a known phone sequence."""
 
-    def align(self, entry: LexiconEntry, encoded: EncodedFrames) -> list[PhoneSpan]:
+    def align(self, entry: LexiconEntry, prepared: PreparedAudio, encoded: EncodedFrames) -> list[PhoneSpan]:
+        del prepared
         frame_count = max(1, len(encoded.embeddings))
         phones = entry.phones
         weights = np.array([phone_duration_weight(phone) for phone in phones], dtype=np.float32)
@@ -98,6 +100,11 @@ class ConstrainedPhonemeAligner:
             )
 
         return spans
+
+
+class PhonemeAligner(Protocol):
+    def align(self, entry: LexiconEntry, prepared: PreparedAudio, encoded: EncodedFrames) -> list[PhoneSpan]:
+        ...
 
 
 @dataclass

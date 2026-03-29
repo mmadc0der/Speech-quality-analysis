@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pronunciation_backend.models import PronunciationAssessmentResponse
-from pronunciation_backend.services.aligner import ConstrainedPhonemeAligner, PhoneFeatureBuilder
+from pronunciation_backend.services.aligner import PhonemeAligner, PhoneFeatureBuilder
 from pronunciation_backend.services.audio_prep import AudioPrepService
 from pronunciation_backend.services.feature_encoder import SSLFeatureEncoder
 from pronunciation_backend.services.lexicon import LexiconService
@@ -18,7 +18,7 @@ class PronunciationPipeline:
     reference_audio_service: ReferenceAudioService
     audio_prep_service: AudioPrepService
     feature_encoder: SSLFeatureEncoder
-    aligner: ConstrainedPhonemeAligner
+    aligner: PhonemeAligner
     feature_builder: PhoneFeatureBuilder
     scorer_runtime: ScorerRuntime
     response_mapper: ResponseMapper
@@ -27,7 +27,7 @@ class PronunciationPipeline:
         entry = self.lexicon_service.get_word(word)
         prepared = self.audio_prep_service.decode(audio_bytes, enable_trim=not no_trim)
         encoded = self.feature_encoder.encode(prepared)
-        spans = self.aligner.align(entry, encoded)
+        spans = self.aligner.align(entry, prepared, encoded)
         phone_features = self.feature_builder.build(encoded, spans)
         runtime_result = self.scorer_runtime.score(phone_features)
         reference = self.reference_audio_service.get_reference(entry.reference_audio_id, entry.ipa)

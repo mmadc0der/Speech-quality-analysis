@@ -18,14 +18,14 @@ The backend follows the plan's align-based pipeline:
 1. `LexiconService` resolves the canonical word entry.
 2. `AudioPrepService` decodes audio and computes quality metrics.
 3. `SSLFeatureEncoder` produces frame-level speech features.
-4. `ConstrainedPhonemeAligner` aligns the audio to the known phone sequence.
+4. `MfaForcedAligner` runs forced alignment against the known transcript in a separate MFA subprocess.
 5. `PhoneScoringHead` computes `match`, `duration`, `presence`, and `confidence`.
 6. `PronunciationPipeline` calibrates scores and returns the API response.
 
 This repository ships a runnable MVP implementation with:
 
-- a deterministic fallback encoder/scorer that works without ML weights
-- hooks for a frozen `HuBERT` or `Wav2Vec2` encoder
+- a frozen `HuBERT`-style runtime encoder and `v2` scorer path
+- MFA-based inference-time phoneme alignment
 - resource manifests for a starter `en-US` vocabulary
 - training artifact schemas for aligned phoneme supervision
 
@@ -62,16 +62,24 @@ If you also want to experiment with a Hugging Face speech backbone:
 pip install -e .[ml]
 ```
 
-Set `PRONUNCIATION_BACKBONE_ID` to a compatible checkpoint such as a HuBERT or Wav2Vec2 model. By default the service stays on the lightweight fallback path until a model is available.
+Set `PRONUNCIATION_BACKBONE_ID` to a compatible checkpoint such as a HuBERT or Wav2Vec2 model.
 
-For the current `scorer_v2` serving path, set the runtime env vars before launch:
+For the current `scorer_v2` serving path, set the runtime env vars before launch. The backend process stays in the project `uv` environment, while MFA is launched through an explicit external command, typically from micromamba:
 
 ```bash
 export PRONUNCIATION_USE_HF_ENCODER=1
 export PRONUNCIATION_SCORER_CHECKPOINT_PATH=/path/to/scorer_v2_best.pt
 export PRONUNCIATION_SCORER_DEVICE=cuda
+export PRONUNCIATION_MFA_COMMAND="/opt/micromamba/bin/micromamba run -n mfa mfa"
+export PRONUNCIATION_MFA_ACOUSTIC_MODEL=english_us_arpa
 uvicorn pronunciation_backend.main:app --host 0.0.0.0 --port 8000
 ```
+
+Notes:
+
+- `PRONUNCIATION_MFA_COMMAND` should resolve to the `mfa` executable itself or to a launcher command that ends by invoking `mfa`; the backend appends the `align` subcommand and request-specific arguments.
+- `PRONUNCIATION_MFA_ACOUSTIC_MODEL` is passed directly to MFA and should point at the acoustic model you want to use for inference-time alignment.
+- if MFA is unavailable or misconfigured, the app can still start, but `POST /v1/pronunciation/score` will fail with a clear `503` response
 
 ## Run Lightweight Frontend
 
@@ -110,6 +118,8 @@ Multipart form fields:
 - `audio`: mono recording file
 - `speaker_id`: optional
 - `noTrim`: optional boolean flag that skips backend auto-trim
+
+The backend aligns the trimmed clip with MFA on every scoring request. It does not use the old heuristic phoneme partitioner for runtime scoring.
 
 The response returns:
 

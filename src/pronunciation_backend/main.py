@@ -6,10 +6,11 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 
 from pronunciation_backend.config import Settings, settings
 from pronunciation_backend.models import PronunciationAssessmentResponse
-from pronunciation_backend.services.aligner import ConstrainedPhonemeAligner, PhoneFeatureBuilder
+from pronunciation_backend.services.aligner import PhoneFeatureBuilder
 from pronunciation_backend.services.audio_prep import AudioPrepService, AudioValidationError
 from pronunciation_backend.services.feature_encoder import SSLFeatureEncoder
 from pronunciation_backend.services.lexicon import LexiconService, UnknownWordError
+from pronunciation_backend.services.mfa_aligner import AlignmentError, MfaForcedAligner
 from pronunciation_backend.services.pipeline import PronunciationPipeline
 from pronunciation_backend.services.reference import ReferenceAudioService
 from pronunciation_backend.services.response_mapper import ResponseMapper
@@ -18,6 +19,8 @@ from pronunciation_backend.services.scorer_v2_runtime import ScorerV2Runtime
 
 def build_pipeline(active_settings: Settings) -> PronunciationPipeline:
     active_settings.validate_runtime()
+    if active_settings.aligner_backend != "mfa":
+        raise ValueError(f"Unsupported aligner backend: {active_settings.aligner_backend}")
     scorer_runtime = ScorerV2Runtime(
         checkpoint_path=active_settings.scorer_checkpoint_path,
         backbone_id=active_settings.backbone_id,
@@ -29,7 +32,12 @@ def build_pipeline(active_settings: Settings) -> PronunciationPipeline:
         reference_audio_service=ReferenceAudioService(active_settings.reference_manifest_path),
         audio_prep_service=AudioPrepService(active_settings),
         feature_encoder=SSLFeatureEncoder(active_settings),
-        aligner=ConstrainedPhonemeAligner(),
+        aligner=MfaForcedAligner(
+            command=active_settings.mfa_command,
+            acoustic_model=active_settings.mfa_acoustic_model,
+            work_root=active_settings.mfa_work_root,
+            timeout_seconds=active_settings.mfa_timeout_seconds,
+        ),
         feature_builder=PhoneFeatureBuilder(),
         scorer_runtime=scorer_runtime,
         response_mapper=ResponseMapper(),
@@ -94,6 +102,8 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except AudioValidationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except AlignmentError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except FileNotFoundError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         except ValueError as exc:

@@ -61,8 +61,8 @@ class _FakeFeatureEncoder:
 
 @dataclass
 class _FakeAligner:
-    def align(self, entry: LexiconEntry, encoded: EncodedFrames) -> list[PhoneSpan]:
-        del entry, encoded
+    def align(self, entry: LexiconEntry, prepared: PreparedAudio, encoded: EncodedFrames) -> list[PhoneSpan]:
+        del entry, prepared, encoded
         return [
             PhoneSpan("TH", 0, 3, 0, 60, 0.9, 0.0),
             PhoneSpan("AO", 3, 7, 60, 140, 0.95, 0.0),
