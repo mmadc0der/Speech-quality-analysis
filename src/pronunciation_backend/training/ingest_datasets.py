@@ -29,6 +29,7 @@ from pronunciation_backend.training.feature_store import FeaturePrecomputeSpec, 
 from pronunciation_backend.training.prepare_libritts import main as prepare_libritts_main
 from pronunciation_backend.training.prepare_speechocean762 import main as prepare_speechocean762_main
 from pronunciation_backend.training.prepare_speechocean762_mfa import main as prepare_speechocean762_mfa_main
+from pronunciation_backend.training.speechocean_utils import resolve_speechocean_raw_root
 
 STAGE_ORDER = ("download", "prepare", "align", "feature-plan", "feature-precompute", "refresh-map")
 
@@ -236,8 +237,7 @@ def _promote_single_child(root: Path, expected_names: tuple[str, ...], *, overwr
     expected = {name.lower() for name in expected_names}
     while True:
         children = [child for child in root.iterdir() if child.is_dir()]
-        files = [child for child in root.iterdir() if child.is_file()]
-        if files or len(children) != 1:
+        if len(children) != 1:
             return
         child = children[0]
         if child.name.lower() not in expected:
@@ -308,8 +308,60 @@ def _import_local_source(source_path: Path, destination_root: Path, part_spec: D
     raise ValueError(f"Unsupported local source type for {source_path}. Expected a directory, .zip, or tar archive.")
 
 
-def _part_ready(spec: DatasetPartSpec, dataset_base: Path) -> bool:
-    return all((dataset_base / marker).exists() for marker in spec.expected_markers)
+def _join_relative(base: Path, parts: tuple[str, ...]) -> Path:
+    return base.joinpath(*parts) if parts else base
+
+
+def _normalized_raw_roots(spec: DatasetSpec, dataset_base: Path) -> list[Path]:
+    raw_root = dataset_base / "raw"
+    if not raw_root.exists():
+        return []
+    children = {child.name.lower(): child for child in raw_root.iterdir() if child.is_dir()}
+    return [children[name.lower()] for name in spec.normalization_roots if name.lower() in children]
+
+
+def _marker_candidates(spec: DatasetSpec, dataset_base: Path, marker: str) -> list[Path]:
+    marker_path = Path(marker)
+    candidates = [dataset_base / marker_path]
+    if marker_path.parts[:1] != ("raw",):
+        return candidates
+
+    relative_to_raw = marker_path.parts[1:]
+    for normalized_root in _normalized_raw_roots(spec, dataset_base):
+        candidates.append(_join_relative(normalized_root, relative_to_raw))
+
+    if spec.slug == "speechocean762":
+        try:
+            raw_root = resolve_speechocean_raw_root(dataset_base)
+        except FileNotFoundError:
+            raw_root = None
+        if raw_root is not None:
+            relative_to_corpus = relative_to_raw
+            if relative_to_corpus[:1] == (spec.slug,):
+                relative_to_corpus = relative_to_corpus[1:]
+            candidates.append(_join_relative(raw_root, relative_to_corpus))
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(candidate)
+    return deduped
+
+
+def _part_ready(spec: DatasetSpec, part_spec: DatasetPartSpec, dataset_base: Path) -> bool:
+    return all(any(candidate.exists() for candidate in _marker_candidates(spec, dataset_base, marker)) for marker in part_spec.expected_markers)
+
+
+def _resolved_part_path(spec: DatasetSpec, part_spec: DatasetPartSpec, dataset_base: Path) -> Path:
+    if spec.slug == "speechocean762":
+        try:
+            return resolve_speechocean_raw_root(dataset_base)
+        except FileNotFoundError:
+            pass
+    return dataset_base / part_spec.import_subdir
 
 
 def _refresh_dataset_record(
@@ -321,15 +373,17 @@ def _refresh_dataset_record(
     now: str,
 ) -> None:
     record.requested_parts = requested_parts
-    record.discovered_parts = [part_name for part_name, part_spec in spec.parts.items() if _part_ready(part_spec, paths.base)]
+    record.discovered_parts = [
+        part_name for part_name, part_spec in spec.parts.items() if _part_ready(spec, part_spec, paths.base)
+    ]
 
     for part_name, part_spec in spec.parts.items():
         part_record = record.part_records.setdefault(part_name, DatasetPartRecord())
         part_record.markers = [str(paths.base / marker) for marker in part_spec.expected_markers]
-        if _part_ready(part_spec, paths.base):
+        if _part_ready(spec, part_spec, paths.base):
             part_record.status = "ready"
             if part_record.extracted_path is None:
-                part_record.extracted_path = str(paths.base / part_spec.import_subdir)
+                part_record.extracted_path = str(_resolved_part_path(spec, part_spec, paths.base))
             if part_record.last_updated is None:
                 part_record.last_updated = now
 
@@ -400,9 +454,9 @@ def _run_download_stage(
     for part_name in requested_parts:
         part_spec = spec.parts[part_name]
         part_record = record.part_records.setdefault(part_name, DatasetPartRecord())
-        if _part_ready(part_spec, paths.base) and not overwrite:
+        if _part_ready(spec, part_spec, paths.base) and not overwrite:
             part_record.status = "ready"
-            part_record.extracted_path = str(paths.base / part_spec.import_subdir)
+            part_record.extracted_path = str(_resolved_part_path(spec, part_spec, paths.base))
             part_record.last_updated = _now_iso()
             print(f"dataset={spec.slug} part={part_name} status=ready")
             continue
@@ -430,8 +484,8 @@ def _run_download_stage(
             continue
 
         _normalize_raw_layout(spec, paths, overwrite=overwrite)
-        part_record.status = "ready" if _part_ready(part_spec, paths.base) else "incomplete"
-        part_record.extracted_path = str(destination_root)
+        part_record.status = "ready" if _part_ready(spec, part_spec, paths.base) else "incomplete"
+        part_record.extracted_path = str(_resolved_part_path(spec, part_spec, paths.base))
         part_record.notes = []
         part_record.last_updated = _now_iso()
         print(f"dataset={spec.slug} part={part_name} status={part_record.status}")

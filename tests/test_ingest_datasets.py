@@ -176,3 +176,65 @@ def test_ingest_datasets_places_l2_arctic_and_records_next_step_note(tmp_path: P
     assert l2_arctic["stage_status"]["download"] == "complete"
     assert l2_arctic["stage_status"]["prepare"] == "not_supported"
     assert any("prepared-manifest generation is not implemented yet" in note for note in l2_arctic["notes"])
+
+
+def test_refresh_map_detects_existing_nested_raw_layouts(tmp_path: Path, monkeypatch) -> None:
+    dataset_root = tmp_path / "datasets"
+    dataset_map_path = tmp_path / "dataset-map.json"
+
+    libritts_root = dataset_root / "libritts"
+    _write_text(libritts_root / "raw" / "LibriTTS" / "dev-clean" / "1" / "2" / "1_2_000001_000001.wav", "wav")
+    _write_text(
+        libritts_root / "raw" / "LibriTTS" / "dev-clean" / "1" / "2" / "1_2_000001_000001.normalized.txt",
+        "HELLO\n",
+    )
+    _write_text(libritts_root / "prepared" / "train.jsonl", "{}\n")
+    _write_text(libritts_root / "prepared" / "val.jsonl", "{}\n")
+    _write_text(libritts_root / "prepared" / "test.jsonl", "{}\n")
+    _write_text(libritts_root / "aligned" / "train.jsonl", "{}\n")
+    _write_text(libritts_root / "aligned" / "val.jsonl", "{}\n")
+    _write_text(libritts_root / "aligned" / "test.jsonl", "{}\n")
+
+    speechocean_root = dataset_root / "speechocean762"
+    _write_json(speechocean_root / "unpacked" / "speechocean762" / "resource" / "scores.json", {"utt-a": {"text": "HELLO", "words": []}})
+    _write_text(speechocean_root / "unpacked" / "speechocean762" / "train" / "wav.scp", "utt-a WAVE/SPK/utt-a.WAV\n")
+    _write_text(speechocean_root / "unpacked" / "speechocean762" / "test" / "wav.scp", "utt-b WAVE/SPK/utt-b.WAV\n")
+    _write_text(speechocean_root / "prepared" / "train.jsonl", "{}\n")
+    _write_text(speechocean_root / "prepared" / "val.jsonl", "{}\n")
+    _write_text(speechocean_root / "prepared" / "test.jsonl", "{}\n")
+    _write_text(speechocean_root / "aligned" / "train.jsonl", "{}\n")
+    _write_text(speechocean_root / "aligned" / "val.jsonl", "{}\n")
+    _write_text(speechocean_root / "aligned" / "test.jsonl", "{}\n")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "ingest_datasets",
+            "--datasets",
+            "libritts",
+            "speechocean762",
+            "--stages",
+            "refresh-map",
+            "--dataset-root",
+            str(dataset_root),
+            "--dataset-map-path",
+            str(dataset_map_path),
+        ],
+    )
+    assert ingest_datasets_main() == 0
+
+    dataset_map = json.loads(dataset_map_path.read_text(encoding="utf-8"))
+
+    libritts = dataset_map["datasets"]["libritts"]
+    assert "dev-clean" in libritts["discovered_parts"]
+    assert libritts["stage_status"]["download"] == "partial"
+    assert libritts["stage_status"]["prepare"] == "complete"
+    assert libritts["stage_status"]["align"] == "complete"
+
+    speechocean = dataset_map["datasets"]["speechocean762"]
+    assert speechocean["discovered_parts"] == ["core"]
+    assert speechocean["stage_status"]["download"] == "complete"
+    assert speechocean["stage_status"]["prepare"] == "complete"
+    assert speechocean["stage_status"]["align"] == "complete"
+    assert speechocean["part_records"]["core"]["extracted_path"].endswith("unpacked/speechocean762")
