@@ -1,5 +1,6 @@
 __pycache__
 .env
 .cursor
+.pronunciation_dataset_map.json
 /*.json
 *.egg-info/

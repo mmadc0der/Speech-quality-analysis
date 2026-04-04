@@ -56,6 +56,14 @@ Recommended directory layout:
     reports/
 ```
 
+Dataset discovery and stage status can also be refreshed through the orchestrator's local cache map:
+
+```text
+<repo>/.pronunciation_dataset_map.json
+```
+
+That file is machine-local and git-ignored. It records which dataset parts were staged, where the canonical dataset roots live, and which prepare or align stages already completed.
+
 ## Feature Key Policy
 
 Each precompute output directory is namespaced by a deterministic hash of the feature spec.
@@ -94,6 +102,15 @@ The actual feature extractor now lives at:
 `python -m pronunciation_backend.training.precompute_features`
 
 The extractor auto-initializes the feature-store by default, so `feature_store plan` is optional once you move to normal runs.
+
+The unified dataset orchestrator can dispatch both stages after dataset alignment is ready:
+
+`python -m pronunciation_backend.training.ingest_datasets`
+
+Relevant orchestrator stages:
+
+- `feature-plan`: create the hashed feature-store manifests
+- `feature-precompute`: run the actual extractor against aligned artifacts
 
 ## Precompute Spec Example
 
@@ -135,6 +152,15 @@ At minimum for the first precompute pass:
 Optional later:
 
 - `/cold/pronunciation/datasets/l2_arctic`
+- `/cold/pronunciation/datasets/librispeech`
+
+If you are using the orchestrator, you can refresh its cache instead of manually re-checking every root:
+
+```bash
+python -m pronunciation_backend.training.ingest_datasets \
+  --datasets libritts speechocean762 l2_arctic librispeech \
+  --stages refresh-map
+```
 
 ### Step 3. Optionally create a hashed feature-store plan for `speechocean762`
 
@@ -157,6 +183,16 @@ This command creates:
 - `spec.json`
 - `state.json`
 - split directories under the hashed feature-store path
+
+Equivalent orchestrator form:
+
+```bash
+python -m pronunciation_backend.training.ingest_datasets \
+  --datasets speechocean762 \
+  --stages feature-plan \
+  --backbone-id facebook/hubert-base-ls960 \
+  --embedding-source hubert
+```
 
 ### Step 4. Optionally verify the planned feature-store directory
 
@@ -240,6 +276,17 @@ python -m pronunciation_backend.training.precompute_features \
 ```
 
 This command auto-creates missing feature-store directories and manifests for the matching cache key before extraction starts.
+
+Equivalent orchestrator form:
+
+```bash
+python -m pronunciation_backend.training.ingest_datasets \
+  --datasets libritts \
+  --stages feature-precompute \
+  --backbone-id facebook/hubert-base-ls960 \
+  --embedding-source hubert \
+  --device cuda
+```
 
 For a smaller smoke test:
 

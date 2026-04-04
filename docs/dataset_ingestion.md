@@ -25,11 +25,20 @@ Each dataset should live under:
   reports/
 ```
 
-Recommended first datasets:
+The orchestrator also maintains a machine-local dataset cache map at:
+
+```text
+<repo>/.pronunciation_dataset_map.json
+```
+
+This file is intentionally git-ignored. It records discovered raw roots, requested parts, stage status, and useful handoff paths so reruns can refresh state without rescanning everything manually.
+
+Supported orchestrator datasets:
 
 - `libritts`
 - `speechocean762`
-- optional later: `l2_arctic`
+- `l2_arctic`
+- `librispeech`
 
 ## Processing Stages
 
@@ -87,23 +96,91 @@ Frozen backbone outputs pooled into `PhoneEmbeddingArtifact` rows and written in
 
 ## Current Support
 
-### Implemented now
+### Support Matrix
 
-- hashed feature-store planning and verification
-- actual feature precompute runner
-- persistent `LibriTTS` prepared-manifest builder
-- `LibriTTS` aligned-artifact builder from MFA `TextGrid` outputs plus `CMUdict`
-- helper script for parallel `LibriTTS` MFA alignment launches
+- `libritts`: full orchestrator support for download, raw placement, prepare, and aligned-artifact building once MFA `TextGrid` files and `CMUdict` are available.
+- `speechocean762`: local-source import into canonical raw layout, existing prepare reuse, MFA corpus scaffolding reuse, and aligned-artifact building when `TextGrid` files are available.
+- `l2_arctic`: first-pass adapter for local-source import plus normalized raw placement only; prepare and align stages are not wired yet.
+- `librispeech`: first-pass adapter for direct OpenSLR download plus normalized raw placement only; prepare and align stages are not wired yet.
+- feature-store planning and feature precompute remain reusable after aligned manifests exist.
 
-### Not implemented yet
+## Unified Orchestrator
 
-- `speechocean762` prepared-manifest builder
+The repository now includes:
+
+`python -m pronunciation_backend.training.ingest_datasets`
+
+This command:
+
+1. downloads or imports requested dataset parts into the canonical dataset layout
+2. normalizes raw placement when archives contain wrapper directories
+3. updates `.pronunciation_dataset_map.json` after every stage boundary
+4. reuses the existing `prepare_*`, `build_*_aligned`, and feature-store entrypoints instead of duplicating them
+
+Common stage values:
+
+- `download`
+- `prepare`
+- `align`
+- `feature-plan`
+- `feature-precompute`
+- `refresh-map`
+
+### Examples
+
+Download all official `LibriTTS` parts and stop after raw placement:
+
+```bash
+python -m pronunciation_backend.training.ingest_datasets \
+  --datasets libritts \
+  --stages download
+```
+
+Download one `LibriTTS` subset and immediately prepare manifests:
+
+```bash
+python -m pronunciation_backend.training.ingest_datasets \
+  --datasets libritts \
+  --parts libritts:train-clean-100 \
+  --stages download prepare
+```
+
+Import a local `SpeechOcean762` copy, prepare manifests, and scaffold MFA inputs:
+
+```bash
+python -m pronunciation_backend.training.ingest_datasets \
+  --datasets speechocean762 \
+  --stages download prepare align \
+  --source speechocean762:core=/data/speechocean762
+```
+
+Stage a manual `L2-ARCTIC` download into canonical raw placement:
+
+```bash
+python -m pronunciation_backend.training.ingest_datasets \
+  --datasets l2_arctic \
+  --stages download \
+  --source l2_arctic:full=/data/L2-ARCTIC
+```
+
+Refresh the dataset map without downloading again:
+
+```bash
+python -m pronunciation_backend.training.ingest_datasets \
+  --datasets libritts speechocean762 l2_arctic librispeech \
+  --stages refresh-map
+```
 
 ## `LibriTTS` Prepare Command
 
 The repository now includes:
 
 `python -m pronunciation_backend.training.prepare_libritts`
+
+The orchestrator calls this command for `libritts` when `prepare` is requested, passing:
+
+- `--dataset-root <dataset>/raw`
+- `--output-dir <dataset>/prepared`
 
 This scans a preloaded `LibriTTS` root, finds audio files and sibling transcript files, maps subset names to `train / val / test`, and writes:
 
@@ -142,6 +219,11 @@ The command prints periodic scan progress with:
 The repository now also includes:
 
 `python -m pronunciation_backend.training.build_libritts_aligned`
+
+The orchestrator calls this for `libritts` when `align` is requested and both of the following are supplied:
+
+- `--libritts-textgrid-root`
+- `--libritts-cmudict-path`
 
 This command expects:
 
@@ -213,6 +295,21 @@ The script uses these environment variables when you want to override defaults:
 
 Defaults match the `/cold` layout used by this project.
 
+## `SpeechOcean762` Prepare And Align Reuse
+
+The repository already includes:
+
+- `python -m pronunciation_backend.training.prepare_speechocean762`
+- `python -m pronunciation_backend.training.prepare_speechocean762_mfa`
+- `python -m pronunciation_backend.training.build_speechocean762_aligned`
+
+The orchestrator reuses them in two steps:
+
+1. `prepare` writes `prepared/train.jsonl`, `val.jsonl`, and `test.jsonl`
+2. `align` always materializes an MFA-ready mirrored corpus under `<dataset>/reports/mfa_corpus`, and then builds aligned artifacts if `--speechocean-textgrid-root` is supplied
+
+If `--speechocean-textgrid-root` is omitted, the dataset map records the MFA corpus location and leaves the align stage in a scaffolded state.
+
 ## Recommended Persistent Setup
 
 For each dataset:
@@ -221,5 +318,13 @@ For each dataset:
 2. generate `prepared/*.jsonl`
 3. generate `aligned/*.jsonl`
 4. run feature precompute
+
+With the orchestrator, the same flow becomes:
+
+1. run `ingest_datasets` with `download`
+2. optionally rerun with `prepare`
+3. optionally rerun with `align`
+4. optionally rerun with `feature-plan` or `feature-precompute`
+5. inspect `.pronunciation_dataset_map.json` for the latest discovered paths and stage status
 
 This gives you restartable, inspectable artifacts at every stage instead of a single opaque preprocessing job.
