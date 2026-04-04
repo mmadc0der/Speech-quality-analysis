@@ -43,6 +43,15 @@ class AcousticEncoderPretrainModel(nn.Module):
         dropout: float = 0.05,
         rope_base: float = 10_000.0,
         use_qk_norm: bool = True,
+        architecture_version: str = "v2_compat",
+        block_layout: str | None = None,
+        norm_scheme: str | None = None,
+        branch_scale_init: float | None = None,
+        attention_score_mode: str | None = None,
+        qk_norm_mode: str | None = None,
+        positional_mode: str | None = None,
+        rope_adaptation_scope: str | None = None,
+        rope_reference_seq_len: int | None = None,
     ) -> None:
         super().__init__()
         self.input_dim = input_dim
@@ -55,6 +64,15 @@ class AcousticEncoderPretrainModel(nn.Module):
             dropout=dropout,
             rope_base=rope_base,
             use_qk_norm=use_qk_norm,
+            architecture_version=architecture_version,
+            block_layout=block_layout,
+            norm_scheme=norm_scheme,
+            branch_scale_init=branch_scale_init,
+            attention_score_mode=attention_score_mode,
+            qk_norm_mode=qk_norm_mode,
+            positional_mode=positional_mode,
+            rope_adaptation_scope=rope_adaptation_scope,
+            rope_reference_seq_len=rope_reference_seq_len,
         )
         self.reconstruction_head = nn.Sequential(
             RMSNorm(d_model),
@@ -191,6 +209,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num-layers", type=int, default=6)
     parser.add_argument("--ffn-dim", type=int, default=1_536)
     parser.add_argument("--rope-base", type=float, default=10_000.0)
+    parser.add_argument("--architecture-version", choices=["v2_compat", "v3"], default="v2_compat")
+    parser.add_argument("--block-layout", choices=["sequential_prenorm", "parallel_prenorm"])
+    parser.add_argument("--norm-scheme", choices=["rmsnorm", "sandwich_rmsnorm"])
+    parser.add_argument("--branch-scale-init", type=float)
+    parser.add_argument("--attention-score-mode", choices=["default", "learned_temperature", "talking_heads"])
+    parser.add_argument("--qk-norm-mode", choices=["shared_head_dim", "per_head_qk", "per_head_qkv"])
+    parser.add_argument("--positional-mode", choices=["rope", "rope_auto_adaptive"])
+    parser.add_argument("--rope-adaptation-scope", choices=["batch_seq_len"])
+    parser.add_argument("--rope-reference-seq-len", type=int)
+    parser.add_argument("--disable-qk-norm", action="store_true")
     parser.add_argument("--mask-ratio", type=float, default=0.20)
     parser.add_argument("--mask-block-size", type=int, default=2)
     parser.add_argument("--min-masks", type=int, default=1)
@@ -563,6 +591,16 @@ def main() -> int:
         ffn_dim=args.ffn_dim,
         dropout=args.dropout,
         rope_base=args.rope_base,
+        use_qk_norm=not args.disable_qk_norm,
+        architecture_version=args.architecture_version,
+        block_layout=args.block_layout,
+        norm_scheme=args.norm_scheme,
+        branch_scale_init=args.branch_scale_init,
+        attention_score_mode=args.attention_score_mode,
+        qk_norm_mode=args.qk_norm_mode,
+        positional_mode=args.positional_mode,
+        rope_adaptation_scope=args.rope_adaptation_scope,
+        rope_reference_seq_len=args.rope_reference_seq_len,
     ).to(device)
     optimizer, initialized_dist_for_muon = _build_optimizer(
         model,

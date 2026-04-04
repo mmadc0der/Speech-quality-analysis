@@ -81,6 +81,26 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Memory-map the full Parquet file as one Arrow table (prefer --num-workers 0 if unsure).",
     )
+    parser.add_argument("--acoustic-input-dim", type=int, default=768)
+    parser.add_argument("--d-model", type=int, default=384)
+    parser.add_argument("--num-heads", type=int, default=6)
+    parser.add_argument("--acoustic-layers", type=int, default=6)
+    parser.add_argument("--scorer-layers", type=int, default=2)
+    parser.add_argument("--ffn-dim", type=int, default=1_536)
+    parser.add_argument("--phoneme-vocab-size", type=int, default=42)
+    parser.add_argument("--phoneme-embed-dim", type=int, default=48)
+    parser.add_argument("--dropout", type=float, default=0.05)
+    parser.add_argument("--rope-base", type=float, default=10_000.0)
+    parser.add_argument("--architecture-version", choices=["v2_compat", "v3"], default="v2_compat")
+    parser.add_argument("--block-layout", choices=["sequential_prenorm", "parallel_prenorm"])
+    parser.add_argument("--norm-scheme", choices=["rmsnorm", "sandwich_rmsnorm"])
+    parser.add_argument("--branch-scale-init", type=float)
+    parser.add_argument("--attention-score-mode", choices=["default", "learned_temperature", "talking_heads"])
+    parser.add_argument("--qk-norm-mode", choices=["shared_head_dim", "per_head_qk", "per_head_qkv"])
+    parser.add_argument("--positional-mode", choices=["rope", "rope_auto_adaptive"])
+    parser.add_argument("--rope-adaptation-scope", choices=["batch_seq_len"])
+    parser.add_argument("--rope-reference-seq-len", type=int)
+    parser.add_argument("--disable-qk-norm", action="store_true")
     return parser
 
 
@@ -489,7 +509,28 @@ def main() -> int:
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    model = PhonemeScorerModelV2().to(device)
+    model = PhonemeScorerModelV2(
+        acoustic_input_dim=args.acoustic_input_dim,
+        d_model=args.d_model,
+        num_heads=args.num_heads,
+        acoustic_layers=args.acoustic_layers,
+        scorer_layers=args.scorer_layers,
+        ffn_dim=args.ffn_dim,
+        phoneme_vocab_size=args.phoneme_vocab_size,
+        phoneme_embed_dim=args.phoneme_embed_dim,
+        dropout=args.dropout,
+        rope_base=args.rope_base,
+        use_qk_norm=not args.disable_qk_norm,
+        architecture_version=args.architecture_version,
+        block_layout=args.block_layout,
+        norm_scheme=args.norm_scheme,
+        branch_scale_init=args.branch_scale_init,
+        attention_score_mode=args.attention_score_mode,
+        qk_norm_mode=args.qk_norm_mode,
+        positional_mode=args.positional_mode,
+        rope_adaptation_scope=args.rope_adaptation_scope,
+        rope_reference_seq_len=args.rope_reference_seq_len,
+    ).to(device)
     _maybe_load_pretrained_encoder(
         model,
         checkpoint_path=args.encoder_checkpoint_path,

@@ -15,7 +15,10 @@ from pronunciation_backend.services.scorer_runtime import (
     ScorerRuntimeResult,
 )
 from pronunciation_backend.services.tensor_mapper import PhoneFeatureTensorMapper
-from pronunciation_backend.training.scorer_model_v2 import PhonemeScorerModelV2
+from pronunciation_backend.training.scorer_model_v2 import (
+    PhonemeScorerModelV2,
+    scorer_model_kwargs_from_config,
+)
 from pronunciation_backend.training.scoring_targets import CLASS_ORDER, class_name_from_index
 
 
@@ -44,28 +47,19 @@ class ScorerV2Runtime:
         if not isinstance(payload, dict):
             raise ValueError(f"Unsupported checkpoint payload type: {type(payload)!r}")
 
-        model = PhonemeScorerModelV2(
-            acoustic_input_dim=int(_checkpoint_config_value(payload, "acoustic_input_dim", 768)),
-            d_model=int(_checkpoint_config_value(payload, "d_model", 384)),
-            num_heads=int(_checkpoint_config_value(payload, "num_heads", 6)),
-            acoustic_layers=int(_checkpoint_config_value(payload, "acoustic_layers", 6)),
-            scorer_layers=int(_checkpoint_config_value(payload, "scorer_layers", 2)),
-            ffn_dim=int(_checkpoint_config_value(payload, "ffn_dim", 1_536)),
-            phoneme_vocab_size=int(_checkpoint_config_value(payload, "phoneme_vocab_size", 42)),
-            phoneme_embed_dim=int(_checkpoint_config_value(payload, "phoneme_embed_dim", 48)),
-            dropout=float(_checkpoint_config_value(payload, "dropout", 0.05)),
-            rope_base=float(_checkpoint_config_value(payload, "rope_base", 10_000.0)),
-            use_qk_norm=bool(_checkpoint_config_value(payload, "use_qk_norm", True)),
-        ).to(device)
+        config = payload.get("config") if isinstance(payload.get("config"), dict) else None
+        model = PhonemeScorerModelV2(**scorer_model_kwargs_from_config(config)).to(device)
         state_dict = payload["model_state_dict"] if "model_state_dict" in payload else payload
         if not isinstance(state_dict, dict):
             raise ValueError("checkpoint must contain a model_state_dict dictionary")
         model.load_state_dict(state_dict, strict=self.strict_load)
         model.eval()
         self._model = model
+        architecture_version = str(_checkpoint_config_value(payload, "architecture_version", "v2_compat"))
+        model_version = "v3" if architecture_version == "v3" else "v2"
         self._model_info = ScorerModelInfo(
             runtime_backend="scorer_v2",
-            model_version="v2",
+            model_version=model_version,
             checkpoint_name=self.checkpoint_path.name,
             backbone_id=self.backbone_id,
             device=str(device),

@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TypedDict
 
 import torch
 import torch.nn as nn
 
-from pronunciation_backend.training.acoustic_encoder_v2 import AcousticEncoderBlock, AcousticEncoderV2, RMSNorm
+from pronunciation_backend.training.acoustic_encoder_v2 import (
+    AcousticEncoderBlock,
+    AcousticEncoderV2,
+    EncoderBlockConfig,
+    RMSNorm,
+    build_encoder_block_config,
+)
 from pronunciation_backend.training.scoring_targets import expected_human_score_from_probs, expected_score_from_probs
 
 
@@ -15,6 +22,39 @@ class ScorerV2Outputs(TypedDict):
     class_probs: torch.Tensor
     expected_score: torch.Tensor
     expected_human_score: torch.Tensor
+
+
+def scorer_model_kwargs_from_config(config: Mapping[str, object] | None) -> dict[str, object]:
+    config_dict = config if isinstance(config, Mapping) else {}
+    use_qk_norm = bool(config_dict.get("use_qk_norm", not bool(config_dict.get("disable_qk_norm", False))))
+    kwargs: dict[str, object] = {
+        "acoustic_input_dim": int(config_dict.get("acoustic_input_dim", 768)),
+        "d_model": int(config_dict.get("d_model", 384)),
+        "num_heads": int(config_dict.get("num_heads", 6)),
+        "acoustic_layers": int(config_dict.get("acoustic_layers", 6)),
+        "scorer_layers": int(config_dict.get("scorer_layers", 2)),
+        "ffn_dim": int(config_dict.get("ffn_dim", 1_536)),
+        "phoneme_vocab_size": int(config_dict.get("phoneme_vocab_size", 42)),
+        "phoneme_embed_dim": int(config_dict.get("phoneme_embed_dim", 48)),
+        "dropout": float(config_dict.get("dropout", 0.05)),
+        "rope_base": float(config_dict.get("rope_base", 10_000.0)),
+        "use_qk_norm": use_qk_norm,
+        "architecture_version": str(config_dict.get("architecture_version", "v2_compat")),
+    }
+    optional_keys = (
+        "block_layout",
+        "norm_scheme",
+        "branch_scale_init",
+        "attention_score_mode",
+        "qk_norm_mode",
+        "positional_mode",
+        "rope_adaptation_scope",
+        "rope_reference_seq_len",
+    )
+    for key in optional_keys:
+        if key in config_dict:
+            kwargs[key] = config_dict[key]
+    return kwargs
 
 
 class PhonemeScorerModelV2(nn.Module):
@@ -32,8 +72,31 @@ class PhonemeScorerModelV2(nn.Module):
         dropout: float = 0.05,
         rope_base: float = 10_000.0,
         use_qk_norm: bool = True,
+        architecture_version: str = "v2_compat",
+        block_config: EncoderBlockConfig | None = None,
+        block_layout: str | None = None,
+        norm_scheme: str | None = None,
+        branch_scale_init: float | None = None,
+        attention_score_mode: str | None = None,
+        qk_norm_mode: str | None = None,
+        positional_mode: str | None = None,
+        rope_adaptation_scope: str | None = None,
+        rope_reference_seq_len: int | None = None,
     ) -> None:
         super().__init__()
+        self.block_config = build_encoder_block_config(
+            architecture_version=architecture_version,
+            use_qk_norm=use_qk_norm,
+            block_config=block_config,
+            block_layout=block_layout,
+            norm_scheme=norm_scheme,
+            branch_scale_init=branch_scale_init,
+            attention_score_mode=attention_score_mode,
+            qk_norm_mode=qk_norm_mode,
+            positional_mode=positional_mode,
+            rope_adaptation_scope=rope_adaptation_scope,
+            rope_reference_seq_len=rope_reference_seq_len,
+        )
         self.acoustic_encoder = AcousticEncoderV2(
             input_dim=acoustic_input_dim,
             d_model=d_model,
@@ -43,6 +106,7 @@ class PhonemeScorerModelV2(nn.Module):
             dropout=dropout,
             rope_base=rope_base,
             use_qk_norm=use_qk_norm,
+            block_config=self.block_config,
         )
         self.phoneme_embedding = nn.Embedding(
             num_embeddings=phoneme_vocab_size,
@@ -66,6 +130,7 @@ class PhonemeScorerModelV2(nn.Module):
                     dropout=dropout,
                     rope_base=rope_base,
                     use_qk_norm=use_qk_norm,
+                    block_config=self.block_config,
                 )
                 for _ in range(scorer_layers)
             ]
@@ -140,3 +205,9 @@ class PhonemeScorerModelV2(nn.Module):
             expected_score=expected_score,
             expected_human_score=expected_human_score,
         )
+
+
+class PhonemeScorerModelV3(PhonemeScorerModelV2):
+    def __init__(self, *args, **kwargs) -> None:
+        kwargs.setdefault("architecture_version", "v3")
+        super().__init__(*args, **kwargs)

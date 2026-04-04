@@ -8,7 +8,10 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from pronunciation_backend.training.scorer_model_v2 import PhonemeScorerModelV2
+from pronunciation_backend.training.scorer_model_v2 import (
+    PhonemeScorerModelV2,
+    scorer_model_kwargs_from_config,
+)
 from pronunciation_backend.training.scoring_targets import (
     CLASS_ORDER,
     CORRECT_THRESHOLD,
@@ -86,7 +89,8 @@ def _load_checkpoint(path: Path, *, device: torch.device) -> PhonemeScorerModelV
     if not isinstance(payload, dict):
         raise ValueError(f"Unsupported checkpoint payload type: {type(payload)!r}")
     state_dict = payload["model_state_dict"] if "model_state_dict" in payload else payload
-    model = PhonemeScorerModelV2().to(device)
+    config = payload.get("config") if isinstance(payload.get("config"), dict) else None
+    model = PhonemeScorerModelV2(**scorer_model_kwargs_from_config(config)).to(device)
     model.load_state_dict(state_dict)
     model.eval()
     return model
