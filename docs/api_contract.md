@@ -86,8 +86,9 @@ Multipart form data:
 
 ## Trimming Semantics
 
-- by default the backend runs a lightweight word-region detector over the uploaded clip before encoding
-- detection uses short-time RMS energy, merges tiny inactive gaps, picks the strongest contiguous speech region, and pads both sides slightly
+- by default the backend runs a conservative pre-alignment speech detector over the uploaded clip before encoding
+- detection uses short-time RMS energy with smoothing, finds candidate speech islands, expands and merges nearby islands, and keeps the outer bounds of the plausible utterance region
+- the intent is to remove obvious leading and trailing dead air for speed while preserving weak phones such as short stop releases that might otherwise be clipped away
 - the trimmed clip is then aligned with MFA using the known target word transcript before phoneme features are pooled for the scorer
 - `audio_quality.duration_ms` is the duration that was actually scored after trimming
 - `audio_quality.original_duration_ms` is the full uploaded clip duration before trimming

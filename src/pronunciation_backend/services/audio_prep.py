@@ -119,9 +119,11 @@ class AudioPrepService:
 
         frame_size = max(1, int(round(self.settings.sample_rate * 0.02)))
         hop_size = max(1, int(round(self.settings.sample_rate * 0.01)))
-        pad_frames = max(1, int(round(0.12 / (hop_size / self.settings.sample_rate))))
-        merge_gap_frames = max(1, int(round(0.08 / (hop_size / self.settings.sample_rate))))
-        min_active_frames = max(1, int(round(0.08 / (hop_size / self.settings.sample_rate))))
+        seconds_per_hop = hop_size / self.settings.sample_rate
+        pad_frames = max(1, int(round(0.18 / seconds_per_hop)))
+        merge_gap_frames = max(1, int(round(0.18 / seconds_per_hop)))
+        min_active_frames = max(1, int(round(0.04 / seconds_per_hop)))
+        min_keep_ms = 180
 
         rms_values: list[float] = []
         frame_starts: list[int] = []
@@ -140,15 +142,78 @@ class AudioPrepService:
         if peak_rms <= self.settings.silence_threshold:
             return None
 
-        threshold = max(self.settings.silence_threshold * 1.5, peak_rms * 0.18)
-        active = rms_array >= threshold
+        smoothed_rms = self._moving_average(rms_array, window_size=max(3, int(round(0.05 / seconds_per_hop))))
+        low_threshold = max(self.settings.silence_threshold * 1.25, peak_rms * 0.08)
+        strong_threshold = max(self.settings.silence_threshold * 2.0, peak_rms * 0.18)
+        active = smoothed_rms >= low_threshold
         if not np.any(active):
             return None
 
+        active_ranges = self._collect_active_ranges(
+            active_mask=active,
+            merge_gap_frames=merge_gap_frames,
+            min_active_frames=min_active_frames,
+        )
+        if not active_ranges:
+            return None
+
+        range_scores = [
+            float(np.sum(smoothed_rms[start:end]) * max(1, end - start))
+            for start, end in active_ranges
+        ]
+        max_range_score = max(range_scores)
+
+        significant_ranges: list[tuple[int, int]] = []
+        for index, (start, end) in enumerate(active_ranges):
+            range_peak = float(smoothed_rms[start:end].max()) if end > start else 0.0
+            range_score = range_scores[index]
+            if range_peak >= strong_threshold or range_score >= max_range_score * 0.2:
+                significant_ranges.append((start, end))
+
+        if not significant_ranges:
+            significant_ranges = [active_ranges[int(np.argmax(range_scores))]]
+
+        padded_ranges = [
+            (max(0, start - pad_frames), min(len(frame_starts), end + pad_frames))
+            for start, end in significant_ranges
+        ]
+        merged_ranges = self._merge_ranges(padded_ranges, merge_gap_frames=merge_gap_frames)
+        if not merged_ranges:
+            return None
+
+        best_start = min(start for start, _ in merged_ranges)
+        best_end = max(end for _, end in merged_ranges)
+
+        start_sample = frame_starts[best_start]
+        end_frame_start = frame_starts[max(0, best_end - 1)]
+        end_sample = min(len(samples), end_frame_start + frame_size)
+        if end_sample <= start_sample:
+            return None
+        trimmed_duration_ms = self._sample_to_ms(end_sample - start_sample)
+        removed_ms = self._sample_to_ms(start_sample) + self._sample_to_ms(len(samples) - end_sample)
+        if trimmed_duration_ms < min_keep_ms:
+            return None
+        if removed_ms < max(120, int(round(self._sample_to_ms(len(samples)) * 0.12))):
+            return None
+        return start_sample, end_sample
+
+    def _moving_average(self, values: np.ndarray, *, window_size: int) -> np.ndarray:
+        if len(values) == 0 or window_size <= 1:
+            return values
+        kernel = np.ones(window_size, dtype=np.float32) / float(window_size)
+        return np.convolve(values, kernel, mode="same")
+
+    def _collect_active_ranges(
+        self,
+        *,
+        active_mask: np.ndarray,
+        merge_gap_frames: int,
+        min_active_frames: int,
+    ) -> list[tuple[int, int]]:
         active_ranges: list[tuple[int, int]] = []
         start_index: int | None = None
         gap = 0
-        for index, is_active in enumerate(active.tolist()):
+        for index, is_active in enumerate(active_mask.tolist()):
             if is_active:
                 if start_index is None:
                     start_index = index
@@ -164,23 +229,24 @@ class AudioPrepService:
                 start_index = None
                 gap = 0
         if start_index is not None:
-            end_index = len(active)
+            end_index = len(active_mask)
             if end_index - start_index >= min_active_frames:
                 active_ranges.append((start_index, end_index))
+        return active_ranges
 
-        if not active_ranges:
-            return None
-
-        best_start, best_end = max(active_ranges, key=lambda item: item[1] - item[0])
-        best_start = max(0, best_start - pad_frames)
-        best_end = min(len(frame_starts), best_end + pad_frames)
-
-        start_sample = frame_starts[best_start]
-        end_frame_start = frame_starts[max(0, best_end - 1)]
-        end_sample = min(len(samples), end_frame_start + frame_size)
-        if end_sample <= start_sample:
-            return None
-        return start_sample, end_sample
+    def _merge_ranges(self, ranges: list[tuple[int, int]], *, merge_gap_frames: int) -> list[tuple[int, int]]:
+        if not ranges:
+            return []
+        merged: list[tuple[int, int]] = []
+        current_start, current_end = sorted(ranges)[0]
+        for start, end in sorted(ranges)[1:]:
+            if start - current_end <= merge_gap_frames:
+                current_end = max(current_end, end)
+                continue
+            merged.append((current_start, current_end))
+            current_start, current_end = start, end
+        merged.append((current_start, current_end))
+        return merged
 
     def _sample_to_ms(self, sample_index: int) -> int:
         return int(round((sample_index / self.settings.sample_rate) * 1000))
