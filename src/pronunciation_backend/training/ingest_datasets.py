@@ -5,6 +5,7 @@ import contextlib
 import shutil
 import sys
 import tarfile
+import time
 import urllib.parse
 import urllib.request
 import zipfile
@@ -32,6 +33,11 @@ from pronunciation_backend.training.prepare_speechocean762_mfa import main as pr
 from pronunciation_backend.training.speechocean_utils import resolve_speechocean_raw_root
 
 STAGE_ORDER = ("download", "prepare", "align", "feature-plan", "feature-precompute", "refresh-map")
+DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+DOWNLOAD_PROGRESS_EVERY_SECONDS = 15.0
+DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 60.0
+DEFAULT_DOWNLOAD_RETRIES = 4
+DEFAULT_DOWNLOAD_RETRY_DELAY_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -77,6 +83,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional repeated dataset[:part]=path overrides for local archives or extracted directories.",
     )
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--download-timeout-seconds", type=float, default=DEFAULT_DOWNLOAD_TIMEOUT_SECONDS)
+    parser.add_argument("--download-retries", type=int, default=DEFAULT_DOWNLOAD_RETRIES)
+    parser.add_argument("--download-retry-delay-seconds", type=float, default=DEFAULT_DOWNLOAD_RETRY_DELAY_SECONDS)
 
     parser.add_argument("--libritts-textgrid-root", help="Required for LibriTTS aligned artifact building.")
     parser.add_argument("--libritts-cmudict-path", help="Required for LibriTTS aligned artifact building.")
@@ -207,15 +216,114 @@ def _remove_path(path: Path) -> None:
         path.unlink()
 
 
-def _download_file(url: str, destination: Path, *, overwrite: bool) -> Path:
+def _format_bytes(num_bytes: int) -> str:
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    value = float(num_bytes)
+    for unit in units:
+        if value < 1024.0 or unit == units[-1]:
+            return f"{value:.1f}{unit}" if unit != "B" else f"{int(value)}B"
+        value /= 1024.0
+    return f"{num_bytes}B"
+
+
+def _format_seconds(seconds: float | None) -> str:
+    if seconds is None or seconds < 0:
+        return "unknown"
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    minutes, secs = divmod(int(seconds), 60)
+    if minutes < 60:
+        return f"{minutes}m{secs:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m"
+
+
+def _download_once(url: str, destination: Path, *, timeout_seconds: float) -> Path:
+    temp_destination = destination.with_suffix(destination.suffix + ".part")
+    if temp_destination.exists():
+        temp_destination.unlink()
+
+    request = urllib.request.Request(url, headers={"User-Agent": "pronunciation-ingest/1.0"})
+    started_at = time.monotonic()
+    last_log_at = started_at
+    bytes_written = 0
+
+    with urllib.request.urlopen(request, timeout=timeout_seconds) as response, temp_destination.open("wb") as handle:
+        content_length_header = response.headers.get("Content-Length")
+        total_bytes = int(content_length_header) if content_length_header and content_length_header.isdigit() else None
+        size_label = _format_bytes(total_bytes) if total_bytes is not None else "unknown"
+        print(f"download started url={url} size={size_label} timeout={timeout_seconds:.0f}s")
+
+        while True:
+            chunk = response.read(DOWNLOAD_CHUNK_SIZE)
+            if not chunk:
+                break
+            handle.write(chunk)
+            bytes_written += len(chunk)
+
+            now = time.monotonic()
+            if now - last_log_at >= DOWNLOAD_PROGRESS_EVERY_SECONDS:
+                elapsed = max(now - started_at, 1e-6)
+                rate = bytes_written / elapsed
+                eta = ((total_bytes - bytes_written) / rate) if total_bytes and rate > 0 else None
+                total_label = _format_bytes(total_bytes) if total_bytes is not None else "unknown"
+                print(
+                    "download progress "
+                    f"url={url} bytes={_format_bytes(bytes_written)}/{total_label} "
+                    f"rate={_format_bytes(int(rate))}/s elapsed={_format_seconds(elapsed)} eta={_format_seconds(eta)}"
+                )
+                last_log_at = now
+
+    temp_destination.replace(destination)
+    elapsed = max(time.monotonic() - started_at, 1e-6)
+    average_rate = bytes_written / elapsed
+    print(
+        "download complete "
+        f"url={url} bytes={_format_bytes(bytes_written)} elapsed={_format_seconds(elapsed)} "
+        f"avg_rate={_format_bytes(int(average_rate))}/s path={destination}"
+    )
+    return destination
+
+
+def _download_file(
+    url: str,
+    destination: Path,
+    *,
+    overwrite: bool,
+    timeout_seconds: float,
+    retries: int,
+    retry_delay_seconds: float,
+) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists() and not overwrite:
         print(f"reusing download: {destination}")
         return destination
     print(f"downloading url={url} -> {destination}")
-    with urllib.request.urlopen(url) as response, destination.open("wb") as handle:
-        shutil.copyfileobj(response, handle)
-    return destination
+
+    attempts = max(1, retries)
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            print(f"download attempt={attempt}/{attempts} url={url}")
+            return _download_once(url, destination, timeout_seconds=timeout_seconds)
+        except Exception as exc:
+            last_error = exc
+            temp_destination = destination.with_suffix(destination.suffix + ".part")
+            if temp_destination.exists():
+                temp_destination.unlink()
+            if destination.exists() and overwrite:
+                destination.unlink()
+            if attempt >= attempts:
+                break
+            sleep_seconds = retry_delay_seconds * (2 ** (attempt - 1))
+            print(
+                "download retry "
+                f"url={url} attempt={attempt}/{attempts} wait={_format_seconds(sleep_seconds)} error={exc}"
+            )
+            time.sleep(sleep_seconds)
+
+    assert last_error is not None
+    raise RuntimeError(f"Failed to download {url} after {attempts} attempts: {last_error}") from last_error
 
 
 def _copy_contents(source_dir: Path, destination_dir: Path, *, overwrite: bool) -> None:
@@ -450,6 +558,9 @@ def _run_download_stage(
     requested_parts: list[str],
     source_overrides: dict[tuple[str, str | None], Path],
     overwrite: bool,
+    download_timeout_seconds: float,
+    download_retries: int,
+    download_retry_delay_seconds: float,
 ) -> None:
     for part_name in requested_parts:
         part_spec = spec.parts[part_name]
@@ -471,7 +582,14 @@ def _run_download_stage(
             part_record.source_type = "local"
         elif part_spec.source_url is not None:
             filename = part_spec.filename or Path(urllib.parse.urlparse(part_spec.source_url).path).name
-            archive_path = _download_file(part_spec.source_url, paths.reports / "downloads" / filename, overwrite=overwrite)
+            archive_path = _download_file(
+                part_spec.source_url,
+                paths.reports / "downloads" / filename,
+                overwrite=overwrite,
+                timeout_seconds=download_timeout_seconds,
+                retries=download_retries,
+                retry_delay_seconds=download_retry_delay_seconds,
+            )
             _import_local_source(archive_path, destination_root, part_spec, overwrite=overwrite)
             part_record.source = part_spec.source_url
             part_record.source_type = "url"
@@ -721,6 +839,9 @@ def _execute_stage(
             requested_parts=requested_parts,
             source_overrides=source_overrides,
             overwrite=args.overwrite,
+            download_timeout_seconds=args.download_timeout_seconds,
+            download_retries=args.download_retries,
+            download_retry_delay_seconds=args.download_retry_delay_seconds,
         )
         return
     if stage == "prepare":
