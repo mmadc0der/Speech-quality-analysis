@@ -31,7 +31,10 @@ def build_pipeline(active_settings: Settings) -> PronunciationPipeline:
         strict_load=active_settings.scorer_strict_load,
     )
     return PronunciationPipeline(
-        lexicon_service=LexiconService(active_settings.lexicon_path),
+        lexicon_service=LexiconService(
+            active_settings.lexicon_path,
+            cmudict_path=active_settings.cmudict_path,
+        ),
         reference_audio_service=ReferenceAudioService(active_settings.reference_manifest_path),
         audio_prep_service=AudioPrepService(active_settings),
         feature_encoder=SSLFeatureEncoder(active_settings),

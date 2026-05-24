@@ -116,7 +116,7 @@ When reference curation exists but the asset file is unavailable, `reference.ass
 
 ## Error Cases
 
-- `404`: target word is not in the curated MVP lexicon
+- `404`: target word token is empty, unsupported, or not found in CMUdict
 - `400`: audio is empty, invalid, too short, or too long
 - `503`: MFA is unavailable, times out, or fails to produce a usable alignment for the request
 

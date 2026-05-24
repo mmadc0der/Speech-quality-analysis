@@ -26,7 +26,7 @@ This repository ships a runnable MVP implementation with:
 
 - a frozen `HuBERT`-style runtime encoder and `v2` scorer path
 - MFA-based inference-time phoneme alignment
-- resource manifests for a starter `en-US` vocabulary
+- resource manifests for curated reference-audio metadata
 - training artifact schemas for aligned phoneme supervision
 
 ## Training Direction
@@ -129,8 +129,15 @@ The response returns:
 - IPA
 - reference-audio metadata
 
-## Starter Resources
+## Runtime Vocabulary
 
-The bundled lexicon lives in `src/pronunciation_backend/resources/en_us_words.json`.
+Runtime scoring resolves target words from CMUdict. The bundled file
+`src/pronunciation_backend/resources/en_us_words.json` remains a curated override
+layer for reference audio, IPA, syllables, and stress metadata on a small starter
+set of words.
 
-It is intentionally small and uses one canonical `en-US` pronunciation per word to avoid ambiguous scoring in the MVP.
+- CMUdict-backed words score normally and return `reference: null` unless curated.
+- Unknown tokens, proper nouns missing from CMUdict, and non-English words still
+  return `404`.
+- Optional `PRONUNCIATION_CMUDICT_PATH` can pin a local dictionary file; otherwise
+  the `cmudict` package supplies the runtime dictionary.

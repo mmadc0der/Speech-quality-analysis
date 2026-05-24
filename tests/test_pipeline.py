@@ -130,6 +130,41 @@ class _FakeScorerRuntime:
         )
 
 
+def test_pipeline_scores_cmudict_only_word_without_reference() -> None:
+    @dataclass
+    class _CmudictOnlyLexicon:
+        def get_word(self, word: str) -> LexiconEntry:
+            return LexiconEntry(
+                word=word,
+                phones=["W", "ER", "K"],
+                ipa="wɝk",
+            )
+
+    @dataclass
+    class _UnusedReferenceAudioService:
+        def get_reference(self, audio_id: str, ipa: str) -> ReferencePayload:
+            raise AssertionError("reference lookup should be skipped when reference_audio_id is missing")
+
+    scorer_runtime = _FakeScorerRuntime()
+    pipeline = PronunciationPipeline(
+        lexicon_service=_CmudictOnlyLexicon(),
+        reference_audio_service=_UnusedReferenceAudioService(),
+        audio_prep_service=_FakeAudioPrepService(),
+        feature_encoder=_FakeFeatureEncoder(),
+        aligner=_FakeAligner(),
+        feature_builder=_FakeFeatureBuilder(),
+        scorer_runtime=scorer_runtime,
+        response_mapper=ResponseMapper(),
+    )
+
+    response = pipeline.assess_word(word="work", audio_bytes=b"audio")
+
+    assert response.word == "work"
+    assert response.ipa == "wɝk"
+    assert response.reference is None
+    assert [phone.phoneme for phone in response.phonemes] == ["TH", "AO", "T"]
+
+
 def test_pipeline_omits_reference_when_not_curated() -> None:
     @dataclass
     class _LexiconWithoutReference:

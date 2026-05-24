@@ -205,6 +205,45 @@ def test_score_pronunciation_allows_null_reference(client: TestClient) -> None:
     assert response.json()["reference"] is None
 
 
+def test_score_pronunciation_accepts_cmudict_only_word(client: TestClient) -> None:
+    @dataclass
+    class _CmudictOnlyPipeline(_FakePipeline):
+        def assess_word(self, word: str, audio_bytes: bytes, *, no_trim: bool = False) -> PronunciationAssessmentResponse:
+            response = super().assess_word(word, audio_bytes, no_trim=no_trim)
+            return response.model_copy(update={"word": "work", "reference": None})
+
+    with TestClient(create_app(pipeline_override=_CmudictOnlyPipeline())) as cmudict_client:
+        response = cmudict_client.post(
+            "/v1/pronunciation/score",
+            data={"word": "work"},
+            files={"audio": ("sample.wav", _sine_wave_bytes(), "audio/wav")},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["word"] == "work"
+    assert response.json()["reference"] is None
+
+
+def test_score_pronunciation_returns_404_for_unknown_word() -> None:
+    from pronunciation_backend.services.lexicon import UnknownWordError
+
+    @dataclass
+    class _UnknownWordPipeline(_FakePipeline):
+        def assess_word(self, word: str, audio_bytes: bytes, *, no_trim: bool = False) -> PronunciationAssessmentResponse:
+            del word, audio_bytes, no_trim
+            raise UnknownWordError("Word 'notawordxyz' was not found in CMUdict.")
+
+    with TestClient(create_app(pipeline_override=_UnknownWordPipeline())) as client:
+        response = client.post(
+            "/v1/pronunciation/score",
+            data={"word": "notawordxyz"},
+            files={"audio": ("sample.wav", _sine_wave_bytes(), "audio/wav")},
+        )
+
+    assert response.status_code == 404
+    assert "was not found in CMUdict" in response.json()["detail"]
+
+
 def test_score_pronunciation_returns_503_for_alignment_failure() -> None:
     @dataclass
     class _FailingPipeline(_FakePipeline):
