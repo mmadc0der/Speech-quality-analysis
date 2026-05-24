@@ -21,6 +21,17 @@ from pronunciation_backend.services.scorer_v2_runtime import ScorerV2Runtime
 logger = logging.getLogger(__name__)
 
 
+def configure_logging(active_settings: Settings) -> None:
+    level = getattr(logging, active_settings.log_level.upper(), logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
+    logging.getLogger("pronunciation_backend").setLevel(level)
+    logging.getLogger().setLevel(level)
+    logger.info("Configured pronunciation backend logging level=%s", active_settings.log_level.upper())
+
+
 def _runtime_preflight_entry(active_settings: Settings, pipeline: PronunciationPipeline):
     if active_settings.mfa_preflight_audio_path is not None and active_settings.mfa_preflight_word is not None:
         word = active_settings.mfa_preflight_word.strip()
@@ -96,7 +107,14 @@ def _warm_runtime_pipeline(active_settings: Settings, pipeline: PronunciationPip
         if hasattr(pipeline.aligner, "preflight"):
             timings = pipeline.aligner.preflight(entry, prepared, encoded)  # type: ignore[attr-defined]
             logger.info(
-                "Completed MFA preflight",
+                "Completed MFA preflight word=%s audio_path=%s total_ms=%.3f subprocess_ms=%.3f "
+                "parse_ms=%.3f mapping_ms=%.3f",
+                entry.word,
+                str(asset_path),
+                timings.total_ms,
+                timings.subprocess_ms,
+                timings.parse_ms,
+                timings.mapping_ms,
                 extra={
                     "word": entry.word,
                     "audio_path": str(asset_path),
@@ -122,6 +140,7 @@ def create_app(
     pipeline_override: PronunciationPipeline | None = None,
 ) -> FastAPI:
     active_settings = settings_override or settings
+    configure_logging(active_settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -167,7 +186,50 @@ def create_app(
         del speaker_id  # reserved for future personalization
         try:
             audio_bytes = await audio.read()
-            return get_pipeline_from_request(request).assess_word(word=word, audio_bytes=audio_bytes, no_trim=no_trim)
+            pipeline = get_pipeline_from_request(request)
+            if hasattr(pipeline, "assess_word_with_timings"):
+                response, timings = pipeline.assess_word_with_timings(
+                    word=word,
+                    audio_bytes=audio_bytes,
+                    no_trim=no_trim,
+                )
+                logger.info(
+                    "Completed pronunciation scoring word=%s total_ms=%.3f audio_prep_ms=%.3f "
+                    "feature_encode_ms=%.3f alignment_ms=%.3f alignment_subprocess_ms=%s "
+                    "feature_build_ms=%.3f scorer_ms=%.3f reference_ms=%.3f response_ms=%.3f",
+                    word,
+                    timings.total_ms,
+                    timings.audio_prep_ms,
+                    timings.feature_encode_ms,
+                    timings.alignment_ms,
+                    (
+                        f"{timings.alignment_subprocess_ms:.3f}"
+                        if timings.alignment_subprocess_ms is not None
+                        else "none"
+                    ),
+                    timings.feature_build_ms,
+                    timings.scorer_ms,
+                    timings.reference_ms,
+                    timings.response_ms,
+                    extra={
+                        "word": word,
+                        "audio_prep_ms": round(timings.audio_prep_ms, 3),
+                        "feature_encode_ms": round(timings.feature_encode_ms, 3),
+                        "alignment_ms": round(timings.alignment_ms, 3),
+                        "alignment_subprocess_ms": (
+                            round(timings.alignment_subprocess_ms, 3)
+                            if timings.alignment_subprocess_ms is not None
+                            else None
+                        ),
+                        "feature_build_ms": round(timings.feature_build_ms, 3),
+                        "scorer_ms": round(timings.scorer_ms, 3),
+                        "reference_ms": round(timings.reference_ms, 3),
+                        "response_ms": round(timings.response_ms, 3),
+                        "total_ms": round(timings.total_ms, 3),
+                    },
+                )
+                return response
+            return pipeline.assess_word(word=word, audio_bytes=audio_bytes, no_trim=no_trim)
         except UnknownWordError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except AudioValidationError as exc:

@@ -38,6 +38,12 @@ class Settings:
     device: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_DEVICE", "cpu"))
     hf_compile: bool = field(default_factory=lambda: _env_flag("PRONUNCIATION_HF_COMPILE"))
     hf_compile_mode: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_HF_COMPILE_MODE", "reduce-overhead"))
+    log_level: str = field(
+        default_factory=lambda: os.getenv(
+            "PRONUNCIATION_LOG_LEVEL",
+            "DEBUG" if _env_flag("DEBUG_MODE") else "INFO",
+        )
+    )
     runtime_backend: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_RUNTIME_BACKEND", "scorer_v2"))
     aligner_backend: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_ALIGNER_BACKEND", "mfa"))
     scorer_device: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_SCORER_DEVICE", os.getenv("PRONUNCIATION_DEVICE", "cpu")))
