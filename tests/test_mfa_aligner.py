@@ -247,3 +247,19 @@ def test_mfa_aligner_builds_stressed_dictionary_from_syllables() -> None:
     )
 
     assert aligner._dictionary_phones(entry) == ["B", "AH0", "N", "AE1", "N", "AH0"]
+
+
+def test_mfa_aligner_prefers_explicit_alignment_phones() -> None:
+    aligner = MfaForcedAligner(
+        command="micromamba run -n mfa mfa",
+        acoustic_model="english_us_arpa",
+        work_root=Path("."),
+    )
+    entry = LexiconEntry(
+        word="work",
+        phones=["W", "ER", "K"],
+        ipa="wɝk",
+        alignment_phones=["W", "ER1", "K"],
+    )
+
+    assert aligner._dictionary_phones(entry) == ["W", "ER1", "K"]

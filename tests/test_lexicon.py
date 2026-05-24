@@ -73,6 +73,7 @@ def test_lexicon_service_resolves_cmudict_only_word(
 
     assert entry.word == "work"
     assert entry.phones == ["W", "ER", "K"]
+    assert entry.alignment_phones == ["W", "ER1", "K"]
     assert entry.ipa == "wɝk"
     assert entry.reference_audio_id is None
     assert entry.syllables == []

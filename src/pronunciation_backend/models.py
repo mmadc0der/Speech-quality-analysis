@@ -100,6 +100,7 @@ class LexiconEntry:
     reference_audio_id: str | None = None
     syllables: list[list[str]] = field(default_factory=list)
     stress_pattern: str | None = None
+    alignment_phones: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

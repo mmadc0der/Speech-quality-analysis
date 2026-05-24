@@ -311,6 +311,9 @@ class MfaForcedAligner:
         return combined[:500]
 
     def _dictionary_phones(self, entry: LexiconEntry) -> list[str]:
+        if entry.alignment_phones:
+            return list(entry.alignment_phones)
+
         if not entry.syllables or not entry.stress_pattern:
             return list(entry.phones)
 
