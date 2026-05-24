@@ -5,8 +5,8 @@ set -euo pipefail
 # Compares clean/no_clean and optional micromamba wrapper vs direct mfa binary.
 
 MFA_BIN="${MFA_BIN:-mfa}"
-MFA_COMMAND="${MFA_COMMAND:-micromamba run -n mfa mfa}"
-ACOUSTIC_MODEL="${ACOUSTIC_MODEL:-english_us_arpa}"
+MFA_COMMAND="${MFA_COMMAND:-${PRONUNCIATION_MFA_COMMAND:-micromamba run -n mfa mfa}}"
+ACOUSTIC_MODEL="${ACOUSTIC_MODEL:-${PRONUNCIATION_MFA_ACOUSTIC_MODEL:-english_us_arpa}}"
 AUDIO_PATH="${1:-}"
 WORD="${2:-${WORD:-work}}"
 WORK_ROOT="${WORK_ROOT:-/tmp/mfa-cli-benchmark}"
@@ -109,4 +109,4 @@ if command -v "$MFA_BIN" >/dev/null 2>&1; then
 fi
 
 echo "=== MFA help: align --clean placement ==="
-bash -lc "$MFA_COMMAND align --help" | rg "clean" || true
+bash -lc "$MFA_COMMAND align --help" | python -c "import sys; [print(line, end='') for line in sys.stdin if 'clean' in line.lower()]" || true

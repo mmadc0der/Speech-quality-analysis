@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 
 from pronunciation_backend.config import Settings, settings
 from pronunciation_backend.models import PronunciationAssessmentResponse
@@ -24,11 +25,13 @@ logger = logging.getLogger(__name__)
 def configure_logging(active_settings: Settings) -> None:
     level = getattr(logging, active_settings.log_level.upper(), logging.INFO)
     logging.basicConfig(
-        level=level,
+        level=logging.INFO,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
     logging.getLogger("pronunciation_backend").setLevel(level)
-    logging.getLogger().setLevel(level)
+    logging.getLogger().setLevel(logging.INFO)
+    for noisy_logger in ("urllib3", "huggingface_hub", "filelock"):
+        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
     logger.info("Configured pronunciation backend logging level=%s", active_settings.log_level.upper())
 
 
@@ -155,6 +158,14 @@ def create_app(
         description="Word-level American English pronunciation assessment backend.",
         lifespan=lifespan,
     )
+    if active_settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=active_settings.cors_origins,
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     def get_pipeline_from_request(request: Request) -> PronunciationPipeline:
         pipeline = getattr(request.app.state, "pipeline", None)
