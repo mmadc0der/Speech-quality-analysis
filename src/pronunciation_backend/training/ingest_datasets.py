@@ -238,6 +238,31 @@ def _format_seconds(seconds: float | None) -> str:
     return f"{hours}h{minutes:02d}m"
 
 
+def _archive_validation_error(path: Path) -> str | None:
+    if not path.exists():
+        return "missing file"
+    if path.stat().st_size <= 0:
+        return "empty file"
+
+    lower_name = path.name.lower()
+    try:
+        if lower_name.endswith((".tar.gz", ".tgz", ".tar", ".tar.bz2", ".tar.xz")):
+            with tarfile.open(path, "r:*") as handle:
+                handle.getmembers()
+            return None
+        if lower_name.endswith(".zip"):
+            if not zipfile.is_zipfile(path):
+                return "not a zip file"
+            with zipfile.ZipFile(path) as handle:
+                corrupted_member = handle.testzip()
+            if corrupted_member is not None:
+                return f"corrupt zip member: {corrupted_member}"
+            return None
+    except Exception as exc:
+        return str(exc)
+    return None
+
+
 def _download_once(url: str, destination: Path, *, timeout_seconds: float) -> Path:
     temp_destination = destination.with_suffix(destination.suffix + ".part")
     if temp_destination.exists():
@@ -275,6 +300,10 @@ def _download_once(url: str, destination: Path, *, timeout_seconds: float) -> Pa
                 last_log_at = now
 
     temp_destination.replace(destination)
+    validation_error = _archive_validation_error(destination)
+    if validation_error is not None:
+        destination.unlink(missing_ok=True)
+        raise RuntimeError(f"downloaded archive validation failed: {validation_error}")
     elapsed = max(time.monotonic() - started_at, 1e-6)
     average_rate = bytes_written / elapsed
     print(
@@ -296,8 +325,12 @@ def _download_file(
 ) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists() and not overwrite:
-        print(f"reusing download: {destination}")
-        return destination
+        validation_error = _archive_validation_error(destination)
+        if validation_error is None:
+            print(f"reusing download: {destination}")
+            return destination
+        print(f"discarding cached download: {destination} reason={validation_error}")
+        destination.unlink()
     print(f"downloading url={url} -> {destination}")
 
     attempts = max(1, retries)

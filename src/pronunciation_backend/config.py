@@ -36,13 +36,21 @@ class Settings:
     use_hf_encoder: bool = field(default_factory=lambda: _env_flag("PRONUNCIATION_USE_HF_ENCODER"))
     backbone_id: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_BACKBONE_ID", "facebook/hubert-base-ls960"))
     device: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_DEVICE", "cpu"))
+    hf_compile: bool = field(default_factory=lambda: _env_flag("PRONUNCIATION_HF_COMPILE"))
+    hf_compile_mode: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_HF_COMPILE_MODE", "reduce-overhead"))
     runtime_backend: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_RUNTIME_BACKEND", "scorer_v2"))
     aligner_backend: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_ALIGNER_BACKEND", "mfa"))
     scorer_device: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_SCORER_DEVICE", os.getenv("PRONUNCIATION_DEVICE", "cpu")))
     scorer_strict_load: bool = field(default_factory=lambda: _env_flag("PRONUNCIATION_SCORER_STRICT_LOAD", "1"))
+    scorer_compile: bool = field(default_factory=lambda: _env_flag("PRONUNCIATION_SCORER_COMPILE"))
+    scorer_compile_mode: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_SCORER_COMPILE_MODE", "reduce-overhead"))
     scorer_checkpoint_path: Path | None = field(default_factory=lambda: _optional_env_path("PRONUNCIATION_SCORER_CHECKPOINT_PATH"))
     mfa_command: str | None = field(default_factory=lambda: _optional_env_value("PRONUNCIATION_MFA_COMMAND"))
     mfa_acoustic_model: str | None = field(default_factory=lambda: _optional_env_value("PRONUNCIATION_MFA_ACOUSTIC_MODEL"))
+    mfa_runtime_dictionary_path: Path | None = field(default_factory=lambda: _optional_env_path("PRONUNCIATION_MFA_RUNTIME_DICTIONARY_PATH"))
+    mfa_clean: bool = field(default_factory=lambda: _env_flag("PRONUNCIATION_MFA_CLEAN", "1"))
+    mfa_preflight_audio_path: Path | None = field(default_factory=lambda: _optional_env_path("PRONUNCIATION_MFA_PREFLIGHT_AUDIO_PATH"))
+    mfa_preflight_word: str | None = field(default_factory=lambda: _optional_env_value("PRONUNCIATION_MFA_PREFLIGHT_WORD"))
     mfa_work_root: Path = field(
         default_factory=lambda: _env_path(
             "PRONUNCIATION_MFA_WORK_ROOT",

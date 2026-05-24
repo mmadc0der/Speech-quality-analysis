@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import dataclass, field
+import logging
 
 import numpy as np
 
@@ -15,6 +16,9 @@ except ImportError:  # pragma: no cover - optional runtime
     torch = None
     AutoFeatureExtractor = None
     AutoModel = None
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -31,6 +35,8 @@ class SSLFeatureEncoder:
     """Frozen speech feature extractor for runtime and offline artifact generation."""
 
     settings: Settings
+    compile_model: bool = False
+    compile_mode: str = "reduce-overhead"
     _processor: object | None = field(default=None, init=False, repr=False)
     _model: object | None = field(default=None, init=False, repr=False)
 
@@ -40,6 +46,13 @@ class SSLFeatureEncoder:
         if torch is None:
             raise RuntimeError("torch or transformers not installed, but required for HF encoder.")
         return self._encode_with_hf(audio)
+
+    def warmup(self) -> None:
+        if not self.settings.use_hf_encoder:
+            raise RuntimeError("HF encoder is disabled in settings, but CPU fallback has been removed.")
+        if torch is None:
+            raise RuntimeError("torch or transformers not installed, but required for HF encoder.")
+        self._ensure_hf_model()
 
     def encode_many(self, audios: list[PreparedAudio]) -> list[EncodedFrames]:
         if not audios:
@@ -173,6 +186,7 @@ class SSLFeatureEncoder:
         self._model = AutoModel.from_pretrained(self.settings.backbone_id, low_cpu_mem_usage=True)
         self._model.eval()
         self._model.to(self.settings.device)
+        self._model = self._maybe_compile_model(self._model)
 
     def _forward_hf(self, inputs: dict[str, object]) -> object:
         autocast_context = (
@@ -183,6 +197,20 @@ class SSLFeatureEncoder:
         with torch.inference_mode():
             with autocast_context:
                 return self._model(**inputs)
+
+    def _maybe_compile_model(self, model: object) -> object:
+        if not self.compile_model:
+            return model
+        if torch is None or not hasattr(torch, "compile"):
+            logger.warning("torch.compile is unavailable; keeping HF encoder in eager mode")
+            return model
+        try:
+            compiled_model = torch.compile(model, mode=self.compile_mode)
+            logger.info("Compiled HF encoder with torch.compile", extra={"compile_mode": self.compile_mode})
+            return compiled_model
+        except Exception:  # pragma: no cover - compile failures are environment specific
+            logger.exception("torch.compile failed for HF encoder; falling back to eager mode")
+            return model
 
     def _build_phone_features_gpu(
         self,

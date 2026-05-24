@@ -41,3 +41,14 @@ class LexiconService:
 
     def all_words(self) -> list[str]:
         return sorted(self._entries)
+
+    def runtime_dictionary_lines(self) -> list[str]:
+        lines: list[str] = []
+        for entry in self._entries.values():
+            lines.append(f"{entry.word} {' '.join(entry.phones)}")
+        return lines
+
+    def write_runtime_dictionary(self, path: Path) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(self.runtime_dictionary_lines()) + "\n", encoding="utf-8")
+        return path

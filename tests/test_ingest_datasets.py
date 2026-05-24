@@ -36,6 +36,14 @@ def _create_tar_gz(archive_path: Path, source_dir: Path) -> None:
             handle.add(child, arcname=child.relative_to(source_dir))
 
 
+def _tar_bytes(source_dir: Path) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as handle:
+        for child in source_dir.rglob("*"):
+            handle.add(child, arcname=child.relative_to(source_dir))
+    return buffer.getvalue()
+
+
 def test_ingest_datasets_downloads_and_prepares_libritts_from_local_archive(tmp_path: Path, monkeypatch) -> None:
     dataset_root = tmp_path / "datasets"
     dataset_map_path = tmp_path / "dataset-map.json"
@@ -239,12 +247,14 @@ def test_refresh_map_detects_existing_nested_raw_layouts(tmp_path: Path, monkeyp
     assert speechocean["stage_status"]["download"] == "complete"
     assert speechocean["stage_status"]["prepare"] == "complete"
     assert speechocean["stage_status"]["align"] == "complete"
-    assert speechocean["part_records"]["core"]["extracted_path"].endswith("unpacked/speechocean762")
+    assert Path(speechocean["part_records"]["core"]["extracted_path"]).as_posix().endswith("unpacked/speechocean762")
 
 
 def test_download_file_retries_after_midstream_failure(tmp_path: Path, monkeypatch) -> None:
     destination = tmp_path / "downloads" / "sample.tar.gz"
-    payload = b"hello world"
+    source_root = tmp_path / "source"
+    _write_text(source_root / "file.txt", "hello world")
+    payload = _tar_bytes(source_root)
     attempts: list[float] = []
 
     class FlakyResponse:
@@ -292,3 +302,49 @@ def test_download_file_retries_after_midstream_failure(tmp_path: Path, monkeypat
     assert destination.read_bytes() == payload
     assert attempts == [7.0, 7.0]
     assert not destination.with_suffix(destination.suffix + ".part").exists()
+
+
+def test_download_file_replaces_invalid_cached_archive(tmp_path: Path, monkeypatch) -> None:
+    destination = tmp_path / "downloads" / "sample.tar.gz"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(b"")
+
+    source_root = tmp_path / "source"
+    _write_text(source_root / "file.txt", "hello")
+    payload = _tar_bytes(source_root)
+    attempts: list[float] = []
+
+    class StaticResponse:
+        def __init__(self, body: bytes) -> None:
+            self._buffer = io.BytesIO(body)
+            self.headers = {"Content-Length": str(len(body))}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def read(self, size: int = -1) -> bytes:
+            return self._buffer.read(size)
+
+    def fake_urlopen(request, timeout):
+        attempts.append(timeout)
+        return StaticResponse(payload)
+
+    monkeypatch.setattr(ingest_datasets.urllib.request, "urlopen", fake_urlopen)
+
+    archive_path = ingest_datasets._download_file(
+        "https://example.test/sample.tar.gz",
+        destination,
+        overwrite=False,
+        timeout_seconds=9.0,
+        retries=2,
+        retry_delay_seconds=0.01,
+    )
+
+    assert archive_path == destination
+    assert attempts == [9.0]
+    assert destination.stat().st_size > 0
+    with tarfile.open(destination, "r:*") as handle:
+        assert "file.txt" in handle.getnames()

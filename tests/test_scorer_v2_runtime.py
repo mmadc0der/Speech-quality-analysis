@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import torch
+import pytest
 
 from pronunciation_backend.models import PhoneFeatures
 from pronunciation_backend.services.scorer_v2_runtime import ScorerV2Runtime
@@ -56,3 +57,28 @@ def test_scorer_v2_runtime_loads_checkpoint_and_scores(tmp_path: Path) -> None:
     assert result.model_info.checkpoint_name == checkpoint_path.name
     assert set(result.phone_predictions[0].quality_class_probs) == {"wrong_or_missed", "accented", "correct"}
     assert 0.0 <= result.phone_predictions[0].omission_probability <= 1.0
+
+
+def test_scorer_v2_runtime_can_compile_and_warmup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    model = PhonemeScorerModelV2()
+    checkpoint_path = tmp_path / "scorer_v2_test.pt"
+    torch.save({"model_state_dict": model.state_dict(), "config": {}}, checkpoint_path)
+
+    compile_calls: list[str] = []
+
+    def _fake_compile(compiled_model, mode):  # type: ignore[no-untyped-def]
+        compile_calls.append(mode)
+        return compiled_model
+
+    monkeypatch.setattr(torch, "compile", _fake_compile, raising=False)
+
+    runtime = ScorerV2Runtime(
+        checkpoint_path=checkpoint_path,
+        backbone_id="facebook/hubert-base-ls960",
+        device="cpu",
+        compile_model=True,
+        compile_mode="reduce-overhead",
+    )
+    runtime.warmup()
+
+    assert compile_calls == ["reduce-overhead"]

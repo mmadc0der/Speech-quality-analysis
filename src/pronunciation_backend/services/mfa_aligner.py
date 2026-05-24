@@ -5,6 +5,7 @@ import os
 import shlex
 import subprocess
 import tempfile
+from time import perf_counter
 from dataclasses import dataclass
 from math import ceil, floor
 from pathlib import Path
@@ -54,16 +55,36 @@ class AlignmentResultError(AlignmentError):
     """Raised when MFA output cannot be mapped into scorer spans."""
 
 
+@dataclass(frozen=True)
+class AlignmentTimings:
+    total_ms: float
+    subprocess_ms: float
+    parse_ms: float
+    mapping_ms: float
+
+
 @dataclass
 class MfaForcedAligner:
     command: str | None
     acoustic_model: str | None
     work_root: Path
     timeout_seconds: float = 30.0
+    runtime_dictionary_path: Path | None = None
+    clean: bool = True
     word_tier: str = "words"
     phone_tier: str = "phones"
 
     def align(self, entry: LexiconEntry, prepared: PreparedAudio, encoded: EncodedFrames) -> list[PhoneSpan]:
+        spans, _timings = self.align_with_timing(entry, prepared, encoded)
+        return spans
+
+    def align_with_timing(
+        self,
+        entry: LexiconEntry,
+        prepared: PreparedAudio,
+        encoded: EncodedFrames,
+    ) -> tuple[list[PhoneSpan], AlignmentTimings]:
+        start = perf_counter()
         command_argv = self._command_argv()
         acoustic_model = self._acoustic_model()
         transcript_token = normalize_word_token(entry.word)
@@ -82,13 +103,12 @@ class MfaForcedAligner:
             stem = "utterance"
             wav_path = corpus_dir / f"{stem}.wav"
             lab_path = corpus_dir / f"{stem}.lab"
-            dict_path = base_dir / "lexicon.dict"
-            dictionary_phones = self._dictionary_phones(entry)
+            dict_path = self._dictionary_path(base_dir, entry)
 
             sf.write(wav_path, prepared.samples, prepared.sample_rate)
             lab_path.write_text(transcript_token + "\n", encoding="utf-8")
-            dict_path.write_text(f"{transcript_token} {' '.join(dictionary_phones)}\n", encoding="utf-8")
 
+            subprocess_started = perf_counter()
             process = self._run_mfa(
                 command_argv=command_argv,
                 corpus_dir=corpus_dir,
@@ -97,6 +117,7 @@ class MfaForcedAligner:
                 output_dir=output_dir,
                 temp_mfa_dir=temp_mfa_dir,
             )
+            subprocess_ms = (perf_counter() - subprocess_started) * 1000.0
             if process.returncode != 0:
                 logger.error(
                     "MFA alignment subprocess failed",
@@ -111,12 +132,23 @@ class MfaForcedAligner:
                     f"(exit_code={process.returncode}): {self._format_process_output(process.stdout, process.stderr)}"
                 )
 
+            parse_started = perf_counter()
             textgrid_path = self._locate_textgrid(output_dir)
-            return self._spans_from_textgrid(
+            mapping_started = perf_counter()
+            spans = self._spans_from_textgrid(
                 textgrid_path=textgrid_path,
                 transcript_token=transcript_token,
                 canonical_phones=entry.phones,
                 encoded=encoded,
+            )
+            mapping_ms = (perf_counter() - mapping_started) * 1000.0
+            parse_ms = (mapping_started - parse_started) * 1000.0
+            total_ms = (perf_counter() - start) * 1000.0
+            return spans, AlignmentTimings(
+                total_ms=total_ms,
+                subprocess_ms=subprocess_ms,
+                parse_ms=parse_ms,
+                mapping_ms=mapping_ms,
             )
 
     def _command_argv(self) -> list[str]:
@@ -148,16 +180,20 @@ class MfaForcedAligner:
         output_dir: Path,
         temp_mfa_dir: Path,
     ) -> subprocess.CompletedProcess[str]:
-        args = command_argv + [
-            "align",
-            "--clean",
-            "--temporary_directory",
-            str(temp_mfa_dir),
-            str(corpus_dir),
-            str(dictionary_path),
-            acoustic_model,
-            str(output_dir),
-        ]
+        args = list(command_argv)
+        if self.clean:
+            args.append("--clean")
+        args.extend(
+            [
+                "align",
+                "--temporary_directory",
+                str(temp_mfa_dir),
+                str(corpus_dir),
+                str(dictionary_path),
+                acoustic_model,
+                str(output_dir),
+            ]
+        )
         try:
             return subprocess.run(
                 args,
@@ -176,6 +212,10 @@ class MfaForcedAligner:
                 f"MFA alignment timed out after {self.timeout_seconds:.1f}s."
             ) from exc
 
+    def preflight(self, entry: LexiconEntry, prepared: PreparedAudio, encoded: EncodedFrames) -> AlignmentTimings:
+        _, timings = self.align_with_timing(entry, prepared, encoded)
+        return timings
+
     def _locate_textgrid(self, output_dir: Path) -> Path:
         candidates = sorted(output_dir.rglob("*.TextGrid"))
         if len(candidates) != 1:
@@ -183,6 +223,19 @@ class MfaForcedAligner:
                 f"Expected exactly one MFA TextGrid output, found {len(candidates)} under {output_dir}."
             )
         return candidates[0]
+
+    def _dictionary_path(self, base_dir: Path, entry: LexiconEntry) -> Path:
+        if self.runtime_dictionary_path is not None:
+            if not self.runtime_dictionary_path.exists():
+                raise AlignmentUnavailableError(
+                    f"Configured runtime MFA dictionary does not exist: {self.runtime_dictionary_path}"
+                )
+            return self.runtime_dictionary_path
+
+        dict_path = base_dir / "lexicon.dict"
+        dictionary_phones = self._dictionary_phones(entry)
+        dict_path.write_text(f"{normalize_word_token(entry.word)} {' '.join(dictionary_phones)}\n", encoding="utf-8")
+        return dict_path
 
     def _spans_from_textgrid(
         self,

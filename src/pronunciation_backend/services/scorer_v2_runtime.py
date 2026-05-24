@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import logging
 
 try:
     import torch
@@ -22,6 +23,9 @@ from pronunciation_backend.training.scorer_model_v2 import (
 from pronunciation_backend.training.scoring_targets import CLASS_ORDER, class_name_from_index
 
 
+logger = logging.getLogger(__name__)
+
+
 def _checkpoint_config_value(payload: dict[str, object], key: str, default: object) -> object:
     config = payload.get("config")
     if isinstance(config, dict) and key in config:
@@ -35,6 +39,8 @@ class ScorerV2Runtime:
     backbone_id: str
     device: str = "cpu"
     strict_load: bool = True
+    compile_model: bool = False
+    compile_mode: str = "reduce-overhead"
     tensor_mapper: PhoneFeatureTensorMapper = field(default_factory=PhoneFeatureTensorMapper)
     _model: PhonemeScorerModelV2 = field(init=False, repr=False)
     _model_info: ScorerModelInfo = field(init=False, repr=False)
@@ -54,7 +60,7 @@ class ScorerV2Runtime:
             raise ValueError("checkpoint must contain a model_state_dict dictionary")
         model.load_state_dict(state_dict, strict=self.strict_load)
         model.eval()
-        self._model = model
+        self._model = self._maybe_compile(model)
         architecture_version = str(_checkpoint_config_value(payload, "architecture_version", "v2_compat"))
         model_version = "v3" if architecture_version == "v3" else "v2"
         self._model_info = ScorerModelInfo(
@@ -124,3 +130,35 @@ class ScorerV2Runtime:
             phone_predictions=predictions,
             model_info=self._model_info,
         )
+
+    def warmup(self) -> None:
+        feature_dim = self.tensor_mapper.acoustic_dim
+        dummy_features = [
+            PhoneFeatures(
+                phoneme="AA",
+                start_ms=0,
+                end_ms=40,
+                mean_embedding=[0.0] * feature_dim,
+                variance=0.0,
+                duration_ms=40,
+                duration_z_score=0.0,
+                alignment_confidence=1.0,
+                energy_mean=0.0,
+                starts_late=False,
+            )
+        ]
+        self.score(dummy_features)
+
+    def _maybe_compile(self, model: PhonemeScorerModelV2) -> PhonemeScorerModelV2:
+        if not self.compile_model:
+            return model
+        if torch is None or not hasattr(torch, "compile"):
+            logger.warning("torch.compile is unavailable; keeping scorer in eager mode")
+            return model
+        try:
+            compiled_model = torch.compile(model, mode=self.compile_mode)
+            logger.info("Compiled scorer model with torch.compile", extra={"compile_mode": self.compile_mode})
+            return compiled_model
+        except Exception:  # pragma: no cover - compile failures are environment specific
+            logger.exception("torch.compile failed for scorer model; falling back to eager mode")
+            return model

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 
@@ -20,31 +21,90 @@ from pronunciation_backend.services.scorer_v2_runtime import ScorerV2Runtime
 logger = logging.getLogger(__name__)
 
 
+def _runtime_preflight_entry(active_settings: Settings, pipeline: PronunciationPipeline):
+    if active_settings.mfa_preflight_audio_path is not None and active_settings.mfa_preflight_word is not None:
+        word = active_settings.mfa_preflight_word.strip()
+        if word:
+            entry = pipeline.lexicon_service.get_word(word)
+            asset_path = active_settings.mfa_preflight_audio_path
+            if asset_path.exists():
+                return entry, asset_path
+    for word in pipeline.lexicon_service.all_words():
+        entry = pipeline.lexicon_service.get_word(word)
+        if not entry.reference_audio_id:
+            continue
+        reference = pipeline.reference_audio_service.get_reference(entry.reference_audio_id, entry.ipa)
+        asset_path = reference.asset_path
+        if asset_path and Path(asset_path).exists():
+            return entry, Path(asset_path)
+    return None, None
+
+
 def build_pipeline(active_settings: Settings) -> PronunciationPipeline:
     active_settings.validate_runtime()
     if active_settings.aligner_backend != "mfa":
         raise ValueError(f"Unsupported aligner backend: {active_settings.aligner_backend}")
+    lexicon_service = LexiconService(active_settings.lexicon_path)
+    if active_settings.mfa_runtime_dictionary_path is not None and not active_settings.mfa_runtime_dictionary_path.exists():
+        lexicon_service.write_runtime_dictionary(active_settings.mfa_runtime_dictionary_path)
     scorer_runtime = ScorerV2Runtime(
         checkpoint_path=active_settings.scorer_checkpoint_path,
         backbone_id=active_settings.backbone_id,
         device=active_settings.scorer_device,
         strict_load=active_settings.scorer_strict_load,
+        compile_model=active_settings.scorer_compile,
+        compile_mode=active_settings.scorer_compile_mode,
     )
     return PronunciationPipeline(
-        lexicon_service=LexiconService(active_settings.lexicon_path),
+        lexicon_service=lexicon_service,
         reference_audio_service=ReferenceAudioService(active_settings.reference_manifest_path),
         audio_prep_service=AudioPrepService(active_settings),
-        feature_encoder=SSLFeatureEncoder(active_settings),
+        feature_encoder=SSLFeatureEncoder(
+            active_settings,
+            compile_model=active_settings.hf_compile,
+            compile_mode=active_settings.hf_compile_mode,
+        ),
         aligner=MfaForcedAligner(
             command=active_settings.mfa_command,
             acoustic_model=active_settings.mfa_acoustic_model,
             work_root=active_settings.mfa_work_root,
             timeout_seconds=active_settings.mfa_timeout_seconds,
+            runtime_dictionary_path=active_settings.mfa_runtime_dictionary_path,
+            clean=active_settings.mfa_clean,
         ),
         feature_builder=PhoneFeatureBuilder(),
         scorer_runtime=scorer_runtime,
         response_mapper=ResponseMapper(),
     )
+
+
+def _warm_runtime_pipeline(pipeline: PronunciationPipeline) -> None:
+    pipeline.feature_encoder.warmup()
+    pipeline.scorer_runtime.warmup()
+
+    entry, asset_path = _runtime_preflight_entry(active_settings, pipeline)
+    if entry is None or asset_path is None:
+        logger.warning("Skipping MFA preflight because no bundled reference audio asset was found")
+        return
+
+    prepared = pipeline.audio_prep_service.decode_path(asset_path)
+    encoded = pipeline.feature_encoder.encode(prepared)
+    if hasattr(pipeline.aligner, "preflight"):
+        timings = pipeline.aligner.preflight(entry, prepared, encoded)  # type: ignore[attr-defined]
+        logger.info(
+            "Completed MFA preflight",
+            extra={
+                "word": entry.word,
+                "audio_path": str(asset_path),
+                "total_ms": timings.total_ms,
+                "subprocess_ms": timings.subprocess_ms,
+                "parse_ms": timings.parse_ms,
+                "mapping_ms": timings.mapping_ms,
+            },
+        )
+        return
+
+    pipeline.aligner.align(entry, prepared, encoded)
 
 
 def create_app(
@@ -57,6 +117,8 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.pipeline = pipeline_override or build_pipeline(active_settings)
+        if pipeline_override is None:
+            _warm_runtime_pipeline(app.state.pipeline)
         yield
 
     app = FastAPI(

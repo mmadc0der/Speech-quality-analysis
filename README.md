@@ -70,8 +70,14 @@ For the current `scorer_v2` serving path, set the runtime env vars before launch
 export PRONUNCIATION_USE_HF_ENCODER=1
 export PRONUNCIATION_SCORER_CHECKPOINT_PATH=/path/to/scorer_v2_best.pt
 export PRONUNCIATION_SCORER_DEVICE=cuda
+export PRONUNCIATION_HF_COMPILE=1
+export PRONUNCIATION_SCORER_COMPILE=1
 export PRONUNCIATION_MFA_COMMAND="/opt/micromamba/bin/micromamba run -n mfa mfa"
 export PRONUNCIATION_MFA_ACOUSTIC_MODEL=english_us_arpa
+export PRONUNCIATION_MFA_RUNTIME_DICTIONARY_PATH=/path/to/runtime.dict
+export PRONUNCIATION_MFA_CLEAN=1
+export PRONUNCIATION_MFA_PREFLIGHT_AUDIO_PATH=/path/to/preflight.wav
+export PRONUNCIATION_MFA_PREFLIGHT_WORD=thought
 uvicorn pronunciation_backend.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -79,7 +85,16 @@ Notes:
 
 - `PRONUNCIATION_MFA_COMMAND` should resolve to the `mfa` executable itself or to a launcher command that ends by invoking `mfa`; the backend appends the `align` subcommand and request-specific arguments.
 - `PRONUNCIATION_MFA_ACOUSTIC_MODEL` is passed directly to MFA and should point at the acoustic model you want to use for inference-time alignment.
+- `PRONUNCIATION_HF_COMPILE` and `PRONUNCIATION_SCORER_COMPILE` enable `torch.compile` for the HuBERT encoder and scorer respectively; use them only on a stable deployment target after benchmarking.
+- `PRONUNCIATION_MFA_RUNTIME_DICTIONARY_PATH` can point at a baked dictionary file that covers the full runtime lexicon, which avoids rewriting a one-off dictionary on every request.
+- `PRONUNCIATION_MFA_PREFLIGHT_AUDIO_PATH` and `PRONUNCIATION_MFA_PREFLIGHT_WORD` can point at a small reference clip and its matching word; when present, startup runs one warm alignment before serving traffic.
 - if MFA is unavailable or misconfigured, the app can still start, but `POST /v1/pronunciation/score` will fail with a clear `503` response
+
+To benchmark the request path locally, run:
+
+```bash
+python -m pronunciation_backend.benchmark --audio /path/to/sample.wav --word thought --repeat 10
+```
 
 ## Run Lightweight Frontend
 

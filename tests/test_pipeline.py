@@ -157,9 +157,10 @@ def test_pipeline_omits_reference_when_not_curated() -> None:
         response_mapper=ResponseMapper(),
     )
 
-    response = pipeline.assess_word(word="thought", audio_bytes=b"audio")
+    response, timings = pipeline.assess_word_with_timings(word="thought", audio_bytes=b"audio")
 
     assert response.reference is None
+    assert timings.reference_ms == 0.0
 
 
 def test_pipeline_uses_runtime_and_response_mapper() -> None:
@@ -175,7 +176,7 @@ def test_pipeline_uses_runtime_and_response_mapper() -> None:
         response_mapper=ResponseMapper(),
     )
 
-    response = pipeline.assess_word(word="thought", audio_bytes=b"audio")
+    response, timings = pipeline.assess_word_with_timings(word="thought", audio_bytes=b"audio")
 
     assert response.word == "thought"
     assert response.model_info.runtime_backend == "scorer_v2"
@@ -186,3 +187,5 @@ def test_pipeline_uses_runtime_and_response_mapper() -> None:
     assert response.phonemes[0].end_ms == 560
     assert scorer_runtime.seen_features is not None
     assert [feature.phoneme for feature in scorer_runtime.seen_features] == ["TH", "AO", "T"]
+    assert timings.total_ms >= timings.audio_prep_ms
+    assert timings.scorer_ms >= 0.0
