@@ -6,20 +6,67 @@ from pathlib import Path
 
 from pronunciation_backend.models import LexiconEntry
 from pronunciation_backend.services.mfa_dictionary import runtime_dictionary_line
+from pronunciation_backend.training.cmudict_utils import (
+    VARIANT_SUFFIX_RE,
+    arpabet_to_ipa,
+    normalize_word_token,
+    strip_phone_stress,
+)
 
 
 class UnknownWordError(ValueError):
-    """Raised when a target word is not in the curated MVP lexicon."""
+    """Raised when a target word is not found in CMUdict or is an unsupported token."""
+
+
+def _load_cmudict_entries(cmudict_path: Path | None) -> dict[str, tuple[list[str], list[str]]]:
+    if cmudict_path is not None:
+        if not cmudict_path.exists():
+            raise FileNotFoundError(f"CMUdict file does not exist: {cmudict_path}")
+        entries: dict[str, tuple[list[str], list[str]]] = {}
+        with cmudict_path.open("r", encoding="latin-1") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line or line.startswith(";;;"):
+                    continue
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                normalized = VARIANT_SUFFIX_RE.sub("", parts[0]).lower()
+                if normalized in entries:
+                    continue
+                alignment_phones = [phone.upper() for phone in parts[1:]]
+                entries[normalized] = (
+                    [strip_phone_stress(phone) for phone in alignment_phones],
+                    alignment_phones,
+                )
+        return entries
+
+    import cmudict
+
+    raw = cmudict.dict()
+    entries: dict[str, tuple[list[str], list[str]]] = {}
+    for word, pronunciations in raw.items():
+        normalized = VARIANT_SUFFIX_RE.sub("", word).lower()
+        if normalized in entries or not pronunciations:
+            continue
+        alignment_phones = [phone.upper() for phone in pronunciations[0]]
+        entries[normalized] = (
+            [strip_phone_stress(phone) for phone in alignment_phones],
+            alignment_phones,
+        )
+    return entries
 
 
 @dataclass
 class LexiconService:
     lexicon_path: Path
+    cmudict_path: Path | None = None
 
     def __post_init__(self) -> None:
-        self._entries = self._load_entries()
+        self._curated_entries = self._load_curated_entries()
+        self._cmudict_entries = _load_cmudict_entries(self.cmudict_path)
 
-    def _load_entries(self) -> dict[str, LexiconEntry]:
+    def _load_curated_entries(self) -> dict[str, LexiconEntry]:
         raw = json.loads(self.lexicon_path.read_text(encoding="utf-8"))
         return {
             key.lower(): LexiconEntry(
@@ -29,22 +76,43 @@ class LexiconService:
                 reference_audio_id=value.get("reference_audio_id"),
                 syllables=value.get("syllables", []),
                 stress_pattern=value.get("stress_pattern"),
+                alignment_phones=value.get("alignment_phones", []),
             )
             for key, value in raw.items()
         }
 
     def get_word(self, word: str) -> LexiconEntry:
-        normalized = word.strip().lower()
-        entry = self._entries.get(normalized)
-        if entry is None:
-            raise UnknownWordError(f"Word '{word}' is not supported by the MVP lexicon.")
-        return entry
+        normalized = normalize_word_token(word)
+        if not normalized:
+            raise UnknownWordError(f"Word '{word}' is not a supported dictionary token.")
+
+        curated = self._curated_entries.get(normalized)
+        if curated is not None:
+            return curated
+
+        cmudict_entry = self._cmudict_entries.get(normalized)
+        if cmudict_entry is None:
+            raise UnknownWordError(f"Word '{word}' was not found in CMUdict.")
+        phones, alignment_phones = cmudict_entry
+
+        return LexiconEntry(
+            word=normalized,
+            phones=phones,
+            ipa=arpabet_to_ipa(phones),
+            alignment_phones=alignment_phones,
+        )
 
     def all_words(self) -> list[str]:
-        return sorted(self._entries)
+        return sorted(self._curated_entries)
 
     def runtime_dictionary_lines(self) -> list[str]:
-        return [runtime_dictionary_line(entry) for entry in self._entries.values()]
+        lines = [runtime_dictionary_line(entry) for entry in self._curated_entries.values()]
+        curated_words = set(self._curated_entries)
+        for word, (_phones, alignment_phones) in sorted(self._cmudict_entries.items()):
+            if word in curated_words:
+                continue
+            lines.append(f"{word} {' '.join(alignment_phones)}")
+        return lines
 
     def write_runtime_dictionary(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -352,9 +352,9 @@ INDEX_HTML = """<!doctype html>
         <h2>Target Word</h2>
         <label>
           Word
-          <input id="wordInput" type="text" placeholder="Enter a supported word, e.g. thought">
+          <input id="wordInput" type="text" placeholder="Enter a CMUdict word, e.g. work">
         </label>
-        <div id="wordStatus" class="footer-note">Type a lexicon-supported target word.</div>
+        <div id="wordStatus" class="footer-note">Type an English dictionary word. Curated reference audio is available only for a small starter set.</div>
       </div>
     </section>
 

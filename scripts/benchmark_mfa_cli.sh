@@ -7,21 +7,58 @@ set -euo pipefail
 MFA_BIN="${MFA_BIN:-mfa}"
 MFA_COMMAND="${MFA_COMMAND:-micromamba run -n mfa mfa}"
 ACOUSTIC_MODEL="${ACOUSTIC_MODEL:-english_us_arpa}"
-WORD="${WORD:-thought}"
 AUDIO_PATH="${1:-}"
+WORD="${2:-${WORD:-work}}"
 WORK_ROOT="${WORK_ROOT:-/tmp/mfa-cli-benchmark}"
 REPEAT="${REPEAT:-3}"
 
-if [[ -z "$AUDIO_PATH" ]]; then
-  echo "usage: $0 /path/to/sample.wav" >&2
-  exit 1
-fi
-
 mkdir -p "$WORK_ROOT/corpus" "$WORK_ROOT/out_clean" "$WORK_ROOT/out_no_clean" "$WORK_ROOT/mfa_temp"
 
-cp "$AUDIO_PATH" "$WORK_ROOT/corpus/utterance.wav"
+export WORD WORK_ROOT
+
+if [[ -n "$AUDIO_PATH" ]]; then
+  cp "$AUDIO_PATH" "$WORK_ROOT/corpus/utterance.wav"
+else
+  echo "No WAV path supplied; generating synthetic MFA audio."
+  python - <<'PY'
+import math
+import os
+import wave
+from pathlib import Path
+
+path = Path(os.environ["WORK_ROOT"]) / "corpus" / "utterance.wav"
+sample_rate = 16_000
+duration_ms = 1000
+frequency_hz = 220.0
+frame_count = int(sample_rate * duration_ms / 1000)
+frames = bytearray()
+for index in range(frame_count):
+    sample = int(32767 * 0.2 * math.sin(2.0 * math.pi * frequency_hz * index / sample_rate))
+    frames.extend(sample.to_bytes(2, byteorder="little", signed=True))
+with wave.open(str(path), "wb") as handle:
+    handle.setnchannels(1)
+    handle.setsampwidth(2)
+    handle.setframerate(sample_rate)
+    handle.writeframes(bytes(frames))
+PY
+fi
+
 printf '%s\n' "$WORD" > "$WORK_ROOT/corpus/utterance.lab"
-printf '%s %s\n' "$WORD" "TH AO1 T" > "$WORK_ROOT/lexicon.dict"
+python - <<'PY'
+import os
+from pathlib import Path
+
+from pronunciation_backend.config import settings
+from pronunciation_backend.services.lexicon import LexiconService
+from pronunciation_backend.services.mfa_dictionary import runtime_dictionary_line
+
+word = os.environ["WORD"]
+work_root = Path(os.environ["WORK_ROOT"])
+service = LexiconService(settings.lexicon_path, cmudict_path=settings.cmudict_path)
+entry = service.get_word(word)
+(work_root / "lexicon.dict").write_text(runtime_dictionary_line(entry) + "\n", encoding="utf-8")
+print(f"MFA dictionary entry: {runtime_dictionary_line(entry)}")
+PY
 
 run_case() {
   local label="$1"

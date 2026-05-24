@@ -23,6 +23,9 @@ ARPABET_VOWELS = {
 
 
 def alignment_dictionary_phones(entry: LexiconEntry) -> list[str]:
+    if entry.alignment_phones:
+        return list(entry.alignment_phones)
+
     if not entry.syllables or not entry.stress_pattern:
         return list(entry.phones)
 

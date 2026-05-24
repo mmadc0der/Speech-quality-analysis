@@ -44,7 +44,10 @@ def build_pipeline(active_settings: Settings) -> PronunciationPipeline:
     active_settings.validate_runtime()
     if active_settings.aligner_backend != "mfa":
         raise ValueError(f"Unsupported aligner backend: {active_settings.aligner_backend}")
-    lexicon_service = LexiconService(active_settings.lexicon_path)
+    lexicon_service = LexiconService(
+        active_settings.lexicon_path,
+        cmudict_path=active_settings.cmudict_path,
+    )
     if active_settings.mfa_runtime_dictionary_path is not None and not active_settings.mfa_runtime_dictionary_path.exists():
         lexicon_service.write_runtime_dictionary(active_settings.mfa_runtime_dictionary_path)
     scorer_runtime = ScorerV2Runtime(

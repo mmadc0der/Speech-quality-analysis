@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import tempfile
+import wave
 from pathlib import Path
 from statistics import mean
 
@@ -60,16 +63,48 @@ def run_benchmark(audio_path: Path, word: str, repeat: int, no_trim: bool = Fals
     return report
 
 
+def write_synthetic_wav(
+    path: Path,
+    *,
+    sample_rate: int = 16_000,
+    duration_ms: int = 1000,
+    frequency_hz: float = 220.0,
+) -> Path:
+    frame_count = int(sample_rate * duration_ms / 1000)
+    amplitude = 0.2
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(sample_rate)
+        frames = bytearray()
+        for index in range(frame_count):
+            sample = int(32767 * amplitude * math.sin(2.0 * math.pi * frequency_hz * index / sample_rate))
+            frames.extend(sample.to_bytes(2, byteorder="little", signed=True))
+        handle.writeframes(bytes(frames))
+    return path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Benchmark pronunciation scoring stages.")
-    parser.add_argument("--audio", type=Path, required=True, help="Path to an audio file to score.")
-    parser.add_argument("--word", required=True, help="Target word for scoring.")
+    parser.add_argument("--audio", type=Path, help="Path to an audio file to score. If omitted, a synthetic WAV is used.")
+    parser.add_argument("--word", default="work", help="Target word for scoring.")
     parser.add_argument("--repeat", type=int, default=5, help="Number of benchmark runs to collect.")
     parser.add_argument("--no-trim", action="store_true", help="Skip backend auto-trim while benchmarking.")
+    parser.add_argument("--synthetic-duration-ms", type=int, default=1000, help="Synthetic WAV duration when --audio is omitted.")
+    parser.add_argument("--synthetic-frequency-hz", type=float, default=220.0, help="Synthetic WAV sine frequency.")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
     args = parser.parse_args()
 
-    report = run_benchmark(args.audio, args.word, args.repeat, no_trim=args.no_trim)
+    if args.audio is None:
+        with tempfile.TemporaryDirectory(prefix="pronunciation-benchmark-") as temp_dir:
+            audio_path = write_synthetic_wav(
+                Path(temp_dir) / "synthetic.wav",
+                duration_ms=args.synthetic_duration_ms,
+                frequency_hz=args.synthetic_frequency_hz,
+            )
+            report = run_benchmark(audio_path, args.word, args.repeat, no_trim=args.no_trim)
+    else:
+        report = run_benchmark(args.audio, args.word, args.repeat, no_trim=args.no_trim)
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0

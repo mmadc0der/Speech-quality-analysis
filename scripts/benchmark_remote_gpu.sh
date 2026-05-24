@@ -11,14 +11,9 @@ set -euo pipefail
 : "${PRONUNCIATION_SCORER_CHECKPOINT_PATH:?Set PRONUNCIATION_SCORER_CHECKPOINT_PATH}"
 
 AUDIO_PATH="${1:-}"
-WORD="${2:-thought}"
+WORD="${2:-work}"
 REPEAT="${3:-10}"
 OUTPUT_JSON="${OUTPUT_JSON:-/tmp/pronunciation_benchmark.json}"
-
-if [[ -z "$AUDIO_PATH" ]]; then
-  echo "usage: $0 /path/to/sample.wav [word] [repeat]" >&2
-  exit 1
-fi
 
 export PRONUNCIATION_USE_HF_ENCODER
 export PRONUNCIATION_SCORER_DEVICE
@@ -26,9 +21,16 @@ export PRONUNCIATION_MFA_COMMAND
 export PRONUNCIATION_MFA_ACOUSTIC_MODEL
 export PRONUNCIATION_SCORER_CHECKPOINT_PATH
 
+audio_args=()
+if [[ -n "$AUDIO_PATH" ]]; then
+  audio_args=(--audio "$AUDIO_PATH")
+else
+  echo "No WAV path supplied; using synthetic benchmark audio."
+fi
+
 echo "=== backend benchmark: clean default (MFA_CLEAN=${PRONUNCIATION_MFA_CLEAN:-0}) ==="
 python -m pronunciation_backend.benchmark \
-  --audio "$AUDIO_PATH" \
+  "${audio_args[@]}" \
   --word "$WORD" \
   --repeat "$REPEAT" \
   --json | tee "$OUTPUT_JSON"
@@ -36,7 +38,7 @@ python -m pronunciation_backend.benchmark \
 if [[ "${RUN_MFA_CLEAN_COMPARE:-1}" == "1" ]]; then
   echo "=== backend benchmark: MFA clean enabled ==="
   PRONUNCIATION_MFA_CLEAN=1 python -m pronunciation_backend.benchmark \
-    --audio "$AUDIO_PATH" \
+    "${audio_args[@]}" \
     --word "$WORD" \
     --repeat "$REPEAT" \
     --json | tee "${OUTPUT_JSON%.json}.clean.json"
@@ -45,7 +47,7 @@ fi
 if [[ "${RUN_COMPILE_COMPARE:-0}" == "1" ]]; then
   echo "=== backend benchmark: compile enabled ==="
   PRONUNCIATION_HF_COMPILE=1 PRONUNCIATION_SCORER_COMPILE=1 python -m pronunciation_backend.benchmark \
-    --audio "$AUDIO_PATH" \
+    "${audio_args[@]}" \
     --word "$WORD" \
     --repeat "$REPEAT" \
     --json | tee "${OUTPUT_JSON%.json}.compile.json"

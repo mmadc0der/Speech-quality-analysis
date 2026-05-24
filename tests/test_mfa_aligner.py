@@ -310,3 +310,16 @@ def test_mfa_aligner_builds_stressed_dictionary_from_syllables() -> None:
     )
 
     assert alignment_dictionary_phones(entry) == ["B", "AH0", "N", "AE1", "N", "AH0"]
+
+
+def test_mfa_aligner_prefers_explicit_alignment_phones() -> None:
+    from pronunciation_backend.services.mfa_dictionary import alignment_dictionary_phones
+
+    entry = LexiconEntry(
+        word="work",
+        phones=["W", "ER", "K"],
+        ipa="wɝk",
+        alignment_phones=["W", "ER1", "K"],
+    )
+
+    assert alignment_dictionary_phones(entry) == ["W", "ER1", "K"]

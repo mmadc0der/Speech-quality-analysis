@@ -65,6 +65,7 @@ class Settings:
     checkpoint_root: Path = field(default_factory=lambda: _env_path("PRONUNCIATION_CHECKPOINT_ROOT", os.getenv("PRONUNCIATION_STORAGE_ROOT", "/cold/pronunciation") + "/checkpoints"))
     report_root: Path = field(default_factory=lambda: _env_path("PRONUNCIATION_REPORT_ROOT", os.getenv("PRONUNCIATION_STORAGE_ROOT", "/cold/pronunciation") + "/reports"))
     lexicon_path: Path = Path(__file__).resolve().parent / "resources" / "en_us_words.json"
+    cmudict_path: Path | None = field(default_factory=lambda: _optional_env_path("PRONUNCIATION_CMUDICT_PATH"))
     reference_manifest_path: Path = Path(__file__).resolve().parent / "resources" / "reference_audio_manifest.json"
 
     def validate_runtime(self) -> None:

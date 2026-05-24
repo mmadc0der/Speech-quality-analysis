@@ -45,11 +45,11 @@ def test_lexicon_runtime_dictionary_lines_use_stressed_phones(tmp_path: Path) ->
     )
     service = LexiconService(lexicon_path)
 
-    assert service.runtime_dictionary_lines() == ["cat K AE1 T"]
+    assert "cat K AE1 T" in service.runtime_dictionary_lines()
 
     dict_path = tmp_path / "runtime.dict"
     service.write_runtime_dictionary(dict_path)
-    assert dict_path.read_text(encoding="utf-8").strip() == "cat K AE1 T"
+    assert "cat K AE1 T" in dict_path.read_text(encoding="utf-8").splitlines()
 
 
 @dataclass

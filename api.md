@@ -223,13 +223,14 @@ Response shape:
 
 ### `404 Not Found`
 
-Unknown target word (`UnknownWordError`).
+Unknown target word (`UnknownWordError`). The word token is empty, unsupported, or
+not found in CMUdict.
 
 Response shape:
 
 ```json
 {
-  "detail": "Word 'example' is not supported by the MVP lexicon."
+  "detail": "Word 'example' was not found in CMUdict."
 }
 ```
 

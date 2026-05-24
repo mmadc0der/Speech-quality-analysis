@@ -247,7 +247,9 @@ def test_refresh_map_detects_existing_nested_raw_layouts(tmp_path: Path, monkeyp
     assert speechocean["stage_status"]["download"] == "complete"
     assert speechocean["stage_status"]["prepare"] == "complete"
     assert speechocean["stage_status"]["align"] == "complete"
-    assert Path(speechocean["part_records"]["core"]["extracted_path"]).as_posix().endswith("unpacked/speechocean762")
+    assert Path(speechocean["part_records"]["core"]["extracted_path"]).as_posix().endswith(
+        "unpacked/speechocean762"
+    )
 
 
 def test_download_file_retries_after_midstream_failure(tmp_path: Path, monkeypatch) -> None:
