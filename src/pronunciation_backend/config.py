@@ -48,7 +48,7 @@ class Settings:
     mfa_command: str | None = field(default_factory=lambda: _optional_env_value("PRONUNCIATION_MFA_COMMAND"))
     mfa_acoustic_model: str | None = field(default_factory=lambda: _optional_env_value("PRONUNCIATION_MFA_ACOUSTIC_MODEL"))
     mfa_runtime_dictionary_path: Path | None = field(default_factory=lambda: _optional_env_path("PRONUNCIATION_MFA_RUNTIME_DICTIONARY_PATH"))
-    mfa_clean: bool = field(default_factory=lambda: _env_flag("PRONUNCIATION_MFA_CLEAN", "1"))
+    mfa_clean: bool = field(default_factory=lambda: _env_flag("PRONUNCIATION_MFA_CLEAN", "0"))
     mfa_preflight_audio_path: Path | None = field(default_factory=lambda: _optional_env_path("PRONUNCIATION_MFA_PREFLIGHT_AUDIO_PATH"))
     mfa_preflight_word: str | None = field(default_factory=lambda: _optional_env_value("PRONUNCIATION_MFA_PREFLIGHT_WORD"))
     mfa_work_root: Path = field(

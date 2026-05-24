@@ -37,9 +37,10 @@ def run_benchmark(audio_path: Path, word: str, repeat: int, no_trim: bool = Fals
         timings.append(timing)
 
     def collect(name: str) -> list[float]:
-        return [float(getattr(timing, name)) for timing in timings]
+        return [float(getattr(timing, name)) for timing in timings if getattr(timing, name, None) is not None]
 
-    return {
+    alignment_subprocess = collect("alignment_subprocess_ms")
+    report: dict[str, object] = {
         "word": word,
         "audio_path": str(audio_path),
         "repeat": repeat,
@@ -54,6 +55,9 @@ def run_benchmark(audio_path: Path, word: str, repeat: int, no_trim: bool = Fals
             "total": _summarize(collect("total_ms")),
         },
     }
+    if alignment_subprocess:
+        report["stages"]["alignment_subprocess"] = _summarize(alignment_subprocess)
+    return report
 
 
 def main() -> int:

@@ -78,7 +78,7 @@ def build_pipeline(active_settings: Settings) -> PronunciationPipeline:
     )
 
 
-def _warm_runtime_pipeline(pipeline: PronunciationPipeline) -> None:
+def _warm_runtime_pipeline(active_settings: Settings, pipeline: PronunciationPipeline) -> None:
     pipeline.feature_encoder.warmup()
     pipeline.scorer_runtime.warmup()
 
@@ -87,24 +87,30 @@ def _warm_runtime_pipeline(pipeline: PronunciationPipeline) -> None:
         logger.warning("Skipping MFA preflight because no bundled reference audio asset was found")
         return
 
-    prepared = pipeline.audio_prep_service.decode_path(asset_path)
-    encoded = pipeline.feature_encoder.encode(prepared)
-    if hasattr(pipeline.aligner, "preflight"):
-        timings = pipeline.aligner.preflight(entry, prepared, encoded)  # type: ignore[attr-defined]
-        logger.info(
-            "Completed MFA preflight",
-            extra={
-                "word": entry.word,
-                "audio_path": str(asset_path),
-                "total_ms": timings.total_ms,
-                "subprocess_ms": timings.subprocess_ms,
-                "parse_ms": timings.parse_ms,
-                "mapping_ms": timings.mapping_ms,
-            },
-        )
-        return
+    try:
+        prepared = pipeline.audio_prep_service.decode_path(asset_path)
+        encoded = pipeline.feature_encoder.encode(prepared)
+        if hasattr(pipeline.aligner, "preflight"):
+            timings = pipeline.aligner.preflight(entry, prepared, encoded)  # type: ignore[attr-defined]
+            logger.info(
+                "Completed MFA preflight",
+                extra={
+                    "word": entry.word,
+                    "audio_path": str(asset_path),
+                    "total_ms": timings.total_ms,
+                    "subprocess_ms": timings.subprocess_ms,
+                    "parse_ms": timings.parse_ms,
+                    "mapping_ms": timings.mapping_ms,
+                },
+            )
+            return
 
-    pipeline.aligner.align(entry, prepared, encoded)
+        pipeline.aligner.align(entry, prepared, encoded)
+    except Exception:
+        logger.exception(
+            "MFA preflight failed; continuing startup without blocking scoring requests",
+            extra={"word": entry.word, "audio_path": str(asset_path)},
+        )
 
 
 def create_app(
@@ -118,7 +124,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         app.state.pipeline = pipeline_override or build_pipeline(active_settings)
         if pipeline_override is None:
-            _warm_runtime_pipeline(app.state.pipeline)
+            _warm_runtime_pipeline(active_settings, app.state.pipeline)
         yield
 
     app = FastAPI(

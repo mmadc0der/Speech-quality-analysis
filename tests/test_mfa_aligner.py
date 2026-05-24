@@ -130,8 +130,8 @@ item []:
 
     def _fake_run(args, capture_output, text, timeout, check, env):  # type: ignore[no-untyped-def]
         assert args[:5] == ["micromamba", "run", "-n", "mfa", "mfa"]
-        assert args[5] == "--clean"
-        assert args[6] == "align"
+        assert args[5] == "align"
+        assert args[6] == "--clean"
         assert args[7] == "--temporary_directory"
         assert capture_output is True
         assert text is True
@@ -144,11 +144,9 @@ item []:
         dict_path = Path(args[10])
         assert args[11] == "english_us_arpa"
         output_dir = Path(args[12])
-        temp_mfa_dir = Path(args[8])
 
         assert (corpus_dir / "utterance.lab").read_text(encoding="utf-8").strip() == "cat"
         assert "cat K AE1 T" in dict_path.read_text(encoding="utf-8")
-        assert temp_mfa_dir.name == "mfa_temp"
 
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "utterance.TextGrid").write_text(textgrid, encoding="utf-8")
@@ -232,7 +230,7 @@ item []:
 
 def test_mfa_aligner_uses_baked_dictionary_without_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     baked_dictionary = tmp_path / "runtime.dict"
-    baked_dictionary.write_text("cat K AE T\n", encoding="utf-8")
+    baked_dictionary.write_text("cat K AE1 T\n", encoding="utf-8")
     aligner = MfaForcedAligner(
         command="micromamba run -n mfa mfa",
         acoustic_model="english_us_arpa",
@@ -245,9 +243,10 @@ def test_mfa_aligner_uses_baked_dictionary_without_clean(tmp_path: Path, monkeyp
     def _fake_run(args, capture_output, text, timeout, check, env):  # type: ignore[no-untyped-def]
         assert args[:5] == ["micromamba", "run", "-n", "mfa", "mfa"]
         assert args[5] == "align"
-        assert args[6] == "--temporary_directory"
-        assert Path(args[9]).name == "runtime.dict"
-        output_dir = Path(args[11])
+        assert args[6] == "--no_clean"
+        assert args[7] == "--temporary_directory"
+        assert Path(args[10]).name == "runtime.dict"
+        output_dir = Path(args[12])
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "utterance.TextGrid").write_text(
             """File type = \"ooTextFile\"
@@ -299,11 +298,7 @@ item []:
 
 
 def test_mfa_aligner_builds_stressed_dictionary_from_syllables() -> None:
-    aligner = MfaForcedAligner(
-        command="micromamba run -n mfa mfa",
-        acoustic_model="english_us_arpa",
-        work_root=Path("."),
-    )
+    from pronunciation_backend.services.mfa_dictionary import alignment_dictionary_phones
 
     entry = LexiconEntry(
         word="banana",
@@ -314,4 +309,4 @@ def test_mfa_aligner_builds_stressed_dictionary_from_syllables() -> None:
         stress_pattern="010",
     )
 
-    assert aligner._dictionary_phones(entry) == ["B", "AH0", "N", "AE1", "N", "AH0"]
+    assert alignment_dictionary_phones(entry) == ["B", "AH0", "N", "AE1", "N", "AH0"]

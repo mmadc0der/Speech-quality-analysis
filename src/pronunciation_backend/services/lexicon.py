@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pronunciation_backend.models import LexiconEntry
+from pronunciation_backend.services.mfa_dictionary import runtime_dictionary_line
 
 
 class UnknownWordError(ValueError):
@@ -43,10 +44,7 @@ class LexiconService:
         return sorted(self._entries)
 
     def runtime_dictionary_lines(self) -> list[str]:
-        lines: list[str] = []
-        for entry in self._entries.values():
-            lines.append(f"{entry.word} {' '.join(entry.phones)}")
-        return lines
+        return [runtime_dictionary_line(entry) for entry in self._entries.values()]
 
     def write_runtime_dictionary(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)

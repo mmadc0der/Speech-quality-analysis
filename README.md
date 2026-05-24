@@ -75,7 +75,7 @@ export PRONUNCIATION_SCORER_COMPILE=1
 export PRONUNCIATION_MFA_COMMAND="/opt/micromamba/bin/micromamba run -n mfa mfa"
 export PRONUNCIATION_MFA_ACOUSTIC_MODEL=english_us_arpa
 export PRONUNCIATION_MFA_RUNTIME_DICTIONARY_PATH=/path/to/runtime.dict
-export PRONUNCIATION_MFA_CLEAN=1
+export PRONUNCIATION_MFA_CLEAN=0
 export PRONUNCIATION_MFA_PREFLIGHT_AUDIO_PATH=/path/to/preflight.wav
 export PRONUNCIATION_MFA_PREFLIGHT_WORD=thought
 uvicorn pronunciation_backend.main:app --host 0.0.0.0 --port 8000
@@ -87,13 +87,16 @@ Notes:
 - `PRONUNCIATION_MFA_ACOUSTIC_MODEL` is passed directly to MFA and should point at the acoustic model you want to use for inference-time alignment.
 - `PRONUNCIATION_HF_COMPILE` and `PRONUNCIATION_SCORER_COMPILE` enable `torch.compile` for the HuBERT encoder and scorer respectively; use them only on a stable deployment target after benchmarking.
 - `PRONUNCIATION_MFA_RUNTIME_DICTIONARY_PATH` can point at a baked dictionary file that covers the full runtime lexicon, which avoids rewriting a one-off dictionary on every request.
-- `PRONUNCIATION_MFA_PREFLIGHT_AUDIO_PATH` and `PRONUNCIATION_MFA_PREFLIGHT_WORD` can point at a small reference clip and its matching word; when present, startup runs one warm alignment before serving traffic.
+- `PRONUNCIATION_MFA_PREFLIGHT_AUDIO_PATH` and `PRONUNCIATION_MFA_PREFLIGHT_WORD` can point at a small reference clip and its matching word; when present, startup runs one warm alignment before serving traffic. Preflight failures are logged and do not block startup.
+- `PRONUNCIATION_MFA_CLEAN=0` is the default for steady-state serving; set it to `1` only when you need MFA to remove artifacts from a reused working directory.
 - if MFA is unavailable or misconfigured, the app can still start, but `POST /v1/pronunciation/score` will fail with a clear `503` response
 
-To benchmark the request path locally, run:
+To benchmark the request path on the remote GPU backend host, run:
 
 ```bash
-python -m pronunciation_backend.benchmark --audio /path/to/sample.wav --word thought --repeat 10
+bash scripts/benchmark_remote_gpu.sh /path/to/sample.wav thought 10
+bash scripts/benchmark_mfa_cli.sh /path/to/sample.wav
+python -m pronunciation_backend.benchmark --audio /path/to/sample.wav --word thought --repeat 10 --json
 ```
 
 ## Run Lightweight Frontend
