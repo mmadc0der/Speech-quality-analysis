@@ -344,7 +344,6 @@ INDEX_HTML = """<!doctype html>
         <div class="pill"><strong>Proxy target:</strong> <span id="backendUrl" class="mono"></span></div>
         <div class="row">
           <button id="pingButton">Ping backend</button>
-          <button id="loadWordsButton">Load supported words</button>
         </div>
         <div id="backendStatus" class="footer-note">Backend status is not checked yet.</div>
       </div>
@@ -353,10 +352,9 @@ INDEX_HTML = """<!doctype html>
         <h2>Target Word</h2>
         <label>
           Word
-          <input id="wordInput" type="text" list="wordOptions" placeholder="Enter a supported word, e.g. thought">
+          <input id="wordInput" type="text" placeholder="Enter a supported word, e.g. thought">
         </label>
-        <datalist id="wordOptions"></datalist>
-        <div id="wordStatus" class="footer-note">Load the word list or type a word directly.</div>
+        <div id="wordStatus" class="footer-note">Type a lexicon-supported target word.</div>
       </div>
     </section>
 
@@ -492,7 +490,6 @@ INDEX_HTML = """<!doctype html>
     const backendUrlEl = document.getElementById("backendUrl");
     const backendStatusEl = document.getElementById("backendStatus");
     const wordInputEl = document.getElementById("wordInput");
-    const wordOptionsEl = document.getElementById("wordOptions");
     const wordStatusEl = document.getElementById("wordStatus");
     const recordButtonEl = document.getElementById("recordButton");
     const stopButtonEl = document.getElementById("stopButton");
@@ -567,24 +564,6 @@ INDEX_HTML = """<!doctype html>
       } catch (error) {
         backendStatusEl.textContent = `Backend check failed: ${error.message}`;
         backendStatusEl.className = "footer-note status-bad";
-      }
-    }
-
-    async function loadWords() {
-      wordStatusEl.textContent = "Loading supported words...";
-      wordStatusEl.className = "footer-note";
-      try {
-        const payload = await fetchJson("/api/words");
-        const words = Array.isArray(payload.words) ? payload.words : [];
-        wordOptionsEl.innerHTML = words.map((word) => `<option value="${escapeHtml(word)}"></option>`).join("");
-        wordStatusEl.textContent = `Loaded ${words.length} words.`;
-        wordStatusEl.className = "footer-note status-ok";
-        if (!wordInputEl.value && words.length > 0) {
-          wordInputEl.value = words[0];
-        }
-      } catch (error) {
-        wordStatusEl.textContent = `Unable to load words: ${error.message}`;
-        wordStatusEl.className = "footer-note status-bad";
       }
     }
 
@@ -1183,7 +1162,6 @@ INDEX_HTML = """<!doctype html>
     }
 
     document.getElementById("pingButton").addEventListener("click", pingBackend);
-    document.getElementById("loadWordsButton").addEventListener("click", loadWords);
     recordButtonEl.addEventListener("click", startRecording);
     stopButtonEl.addEventListener("click", stopRecording);
     clearButtonEl.addEventListener("click", clearAudio);
@@ -1209,7 +1187,7 @@ INDEX_HTML = """<!doctype html>
     trimEndMsEl.addEventListener("input", updateClipVisualization);
     window.addEventListener("resize", drawClipVisualization);
 
-    loadConfig().then(pingBackend).then(loadWords).catch((error) => {
+    loadConfig().then(pingBackend).catch((error) => {
       backendStatusEl.textContent = `Initialization failed: ${error.message}`;
       backendStatusEl.className = "footer-note status-bad";
     });
@@ -1314,15 +1292,6 @@ def create_frontend_app(*, backend_base_url: str) -> FastAPI:
         status_code, content, headers = _proxy_request(
             "GET",
             _join_url(settings.backend_base_url, "/health"),
-            headers={"Accept": "application/json"},
-        )
-        return _proxied_response(status_code, content, headers)
-
-    @app.get("/api/words")
-    def words_proxy() -> Response:
-        status_code, content, headers = _proxy_request(
-            "GET",
-            _join_url(settings.backend_base_url, "/v1/words"),
             headers={"Accept": "application/json"},
         )
         return _proxied_response(status_code, content, headers)

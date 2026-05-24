@@ -23,14 +23,7 @@ from pronunciation_backend.services.scorer_runtime import ScorerModelInfo
 
 
 @dataclass
-class _FakeLexiconService:
-    def all_words(self) -> list[str]:
-        return ["thought", "through"]
-
-
-@dataclass
 class _FakePipeline:
-    lexicon_service: _FakeLexiconService
     last_no_trim: bool | None = None
 
     def model_info(self) -> ScorerModelInfo:
@@ -136,7 +129,7 @@ class _FakePipeline:
 
 @pytest.fixture
 def client() -> TestClient:
-    with TestClient(create_app(pipeline_override=_FakePipeline(lexicon_service=_FakeLexiconService()))) as test_client:
+    with TestClient(create_app(pipeline_override=_FakePipeline())) as test_client:
         yield test_client
 
 
@@ -161,10 +154,9 @@ def test_health(client: TestClient) -> None:
     assert response.json()["runtime_backend"] == "scorer_v2"
 
 
-def test_supported_words(client: TestClient) -> None:
+def test_words_endpoint_not_exposed(client: TestClient) -> None:
     response = client.get("/v1/words")
-    assert response.status_code == 200
-    assert "thought" in response.json()["words"]
+    assert response.status_code == 404
 
 
 def test_score_pronunciation(client: TestClient) -> None:
@@ -195,6 +187,24 @@ def test_score_pronunciation_forwards_no_trim(client: TestClient) -> None:
     assert pipeline.last_no_trim is True
 
 
+def test_score_pronunciation_allows_null_reference(client: TestClient) -> None:
+    @dataclass
+    class _NoReferencePipeline(_FakePipeline):
+        def assess_word(self, word: str, audio_bytes: bytes, *, no_trim: bool = False) -> PronunciationAssessmentResponse:
+            response = super().assess_word(word, audio_bytes, no_trim=no_trim)
+            return response.model_copy(update={"reference": None})
+
+    with TestClient(create_app(pipeline_override=_NoReferencePipeline())) as no_ref_client:
+        response = no_ref_client.post(
+            "/v1/pronunciation/score",
+            data={"word": "thought"},
+            files={"audio": ("sample.wav", _sine_wave_bytes(), "audio/wav")},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["reference"] is None
+
+
 def test_score_pronunciation_returns_503_for_alignment_failure() -> None:
     @dataclass
     class _FailingPipeline(_FakePipeline):
@@ -202,7 +212,7 @@ def test_score_pronunciation_returns_503_for_alignment_failure() -> None:
             del word, audio_bytes, no_trim
             raise AlignmentUnavailableError("MFA aligner is not configured")
 
-    with TestClient(create_app(pipeline_override=_FailingPipeline(lexicon_service=_FakeLexiconService()))) as client:
+    with TestClient(create_app(pipeline_override=_FailingPipeline())) as client:
         response = client.post(
             "/v1/pronunciation/score",
             data={"word": "thought"},

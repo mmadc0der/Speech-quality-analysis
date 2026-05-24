@@ -85,10 +85,6 @@ def create_app(
             "device": model_info.device,
         }
 
-    @app.get("/v1/words")
-    def supported_words(request: Request) -> dict[str, list[str]]:
-        return {"words": get_pipeline_from_request(request).lexicon_service.all_words()}
-
     @app.post("/v1/pronunciation/score", response_model=PronunciationAssessmentResponse)
     async def score_pronunciation(
         request: Request,

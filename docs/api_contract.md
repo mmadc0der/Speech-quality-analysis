@@ -73,6 +73,16 @@ Multipart form data:
 }
 ```
 
+When the lexicon entry has no `reference_audio_id`, the response omits reference metadata:
+
+```json
+{
+  "reference": null
+}
+```
+
+When reference curation exists but the asset file is unavailable, `reference.asset_path` is `null`.
+
 ## Per-Phoneme Semantics
 
 - `expected_score`: pronunciation score projected into the dataset-aligned 0-100 scale

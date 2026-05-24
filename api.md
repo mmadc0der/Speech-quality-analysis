@@ -42,31 +42,6 @@ Health and model-runtime metadata.
 
 ---
 
-### `GET /v1/words`
-
-Returns supported target words from the lexicon.
-
-#### Success response
-
-- Status: `200 OK`
-- Content-Type: `application/json`
-- Body:
-
-```json
-{
-  "words": [
-    "thought",
-    "through"
-  ]
-}
-```
-
-#### Field contract
-
-- `words`: array of strings (lexicon keys, lowercase)
-
----
-
 ### `POST /v1/pronunciation/score`
 
 Scores uploaded audio against one target word.
@@ -160,7 +135,7 @@ Scores uploaded audio against one target word.
 - `audio_quality`: `AudioQualityPayload`
 - `phonemes`: array of `PronunciationPhonePayload`
 - `primary_issue`: `PrimaryIssuePayload`
-- `reference`: `ReferencePayload`
+- `reference`: `ReferencePayload` or `null` when the lexicon entry has no reference audio curation
 - `model_info`: `ModelInfoPayload`
 
 ### `AudioQualityPayload`
@@ -213,8 +188,10 @@ Current runtime issue types emitted by response mapping include:
 ### `ReferencePayload`
 
 - `ipa`: string
-- `audio_id`: string
+- `audio_id`: string or `null`
 - `asset_path`: string or `null`
+
+When present, `reference` carries optional listen-and-compare metadata. Scoring does not depend on reference audio. Omit `reference_audio_id` in the lexicon to return `reference: null`. When `reference_audio_id` is set but the manifest entry or asset file is missing, `asset_path` is `null`.
 
 ### `ModelInfoPayload`
 

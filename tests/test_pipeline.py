@@ -130,6 +130,38 @@ class _FakeScorerRuntime:
         )
 
 
+def test_pipeline_omits_reference_when_not_curated() -> None:
+    @dataclass
+    class _LexiconWithoutReference:
+        def get_word(self, word: str) -> LexiconEntry:
+            return LexiconEntry(
+                word=word,
+                phones=["TH", "AO", "T"],
+                ipa="θɔt",
+            )
+
+    @dataclass
+    class _UnusedReferenceAudioService:
+        def get_reference(self, audio_id: str, ipa: str) -> ReferencePayload:
+            raise AssertionError("reference lookup should be skipped when reference_audio_id is missing")
+
+    scorer_runtime = _FakeScorerRuntime()
+    pipeline = PronunciationPipeline(
+        lexicon_service=_LexiconWithoutReference(),
+        reference_audio_service=_UnusedReferenceAudioService(),
+        audio_prep_service=_FakeAudioPrepService(),
+        feature_encoder=_FakeFeatureEncoder(),
+        aligner=_FakeAligner(),
+        feature_builder=_FakeFeatureBuilder(),
+        scorer_runtime=scorer_runtime,
+        response_mapper=ResponseMapper(),
+    )
+
+    response = pipeline.assess_word(word="thought", audio_bytes=b"audio")
+
+    assert response.reference is None
+
+
 def test_pipeline_uses_runtime_and_response_mapper() -> None:
     scorer_runtime = _FakeScorerRuntime()
     pipeline = PronunciationPipeline(

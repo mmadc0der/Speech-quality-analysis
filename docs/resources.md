@@ -11,7 +11,7 @@ Each entry stores:
 - normalized word text
 - canonical ARPAbet phone sequence
 - IPA transcription
-- reference audio id
+- reference audio id (optional)
 - optional syllable grouping
 - optional stress pattern
 
@@ -28,7 +28,7 @@ Each entry stores:
 - `accent_target`
 - `asset_path`
 
-The API returns the `audio_id` and `asset_path` together with the IPA transcription so the client can render a listen-and-compare UI without extra lookup calls.
+The API returns optional `reference` metadata with `audio_id` and `asset_path` when reference audio is curated, so the client can render a listen-and-compare UI without extra lookup calls. Scoring does not depend on reference audio.
 
 ## Expansion Rules
 
@@ -37,7 +37,7 @@ When expanding the vocabulary:
 1. Add only one canonical `en-US` pronunciation per word.
 2. Avoid highly variable words until multi-pronunciation support exists.
 3. Keep ARPAbet and IPA aligned to the same canonical form.
-4. Attach one stable reference audio asset per lexical entry.
+4. Attach one stable reference audio asset per lexical entry when listen-and-compare metadata is desired.
 
 ## Recommended Next Resource Sources
 

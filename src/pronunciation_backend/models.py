@@ -66,7 +66,7 @@ class PrimaryIssuePayload(BaseModel):
 
 class ReferencePayload(BaseModel):
     ipa: str
-    audio_id: str
+    audio_id: str | None = None
     asset_path: str | None = None
 
 
@@ -88,7 +88,7 @@ class PronunciationAssessmentResponse(BaseModel):
     audio_quality: AudioQualityPayload
     phonemes: list[PronunciationPhonePayload]
     primary_issue: PrimaryIssuePayload
-    reference: ReferencePayload
+    reference: ReferencePayload | None = None
     model_info: ModelInfoPayload
 
 
@@ -97,7 +97,7 @@ class LexiconEntry:
     word: str
     phones: list[str]
     ipa: str
-    reference_audio_id: str
+    reference_audio_id: str | None = None
     syllables: list[list[str]] = field(default_factory=list)
     stress_pattern: str | None = None
 

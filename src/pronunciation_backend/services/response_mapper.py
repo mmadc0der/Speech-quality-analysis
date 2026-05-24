@@ -42,7 +42,7 @@ class ResponseMapper:
         ipa: str,
         prepared_audio: PreparedAudio,
         runtime_result: ScorerRuntimeResult,
-        reference: ReferencePayload,
+        reference: ReferencePayload | None,
     ) -> PronunciationAssessmentResponse:
         audio_quality = self.build_audio_quality(prepared_audio)
         confidence_multiplier = {"ok": 1.0, "low_confidence": 0.9, "rejected": 0.75}[audio_quality.status]

@@ -30,7 +30,9 @@ class PronunciationPipeline:
         spans = self.aligner.align(entry, prepared, encoded)
         phone_features = self.feature_builder.build(encoded, spans)
         runtime_result = self.scorer_runtime.score(phone_features)
-        reference = self.reference_audio_service.get_reference(entry.reference_audio_id, entry.ipa)
+        reference = None
+        if entry.reference_audio_id:
+            reference = self.reference_audio_service.get_reference(entry.reference_audio_id, entry.ipa)
         return self.response_mapper.build_response(
             word=entry.word,
             ipa=entry.ipa,

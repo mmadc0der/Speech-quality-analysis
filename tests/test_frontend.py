@@ -28,20 +28,6 @@ def test_frontend_index_and_config() -> None:
     assert config_response.json()["backend_base_url"] == "http://backend.internal:8000"
 
 
-def test_frontend_words_proxy(monkeypatch) -> None:
-    def fake_proxy(method: str, url: str, **kwargs):
-        del kwargs
-        assert method == "GET"
-        assert url == "http://backend.internal:8000/v1/words"
-        return 200, json.dumps({"words": ["thought", "through"]}).encode("utf-8"), {"Content-Type": "application/json"}
-
-    monkeypatch.setattr(frontend, "_proxy_request", fake_proxy)
-    client = TestClient(frontend.create_frontend_app(backend_base_url="http://backend.internal:8000"))
-
-    response = client.get("/api/words")
-    assert response.status_code == 200
-    assert response.json()["words"] == ["thought", "through"]
-
 
 def test_frontend_score_proxy_forwards_audio(monkeypatch) -> None:
     captured: dict[str, object] = {}
@@ -99,12 +85,12 @@ def test_frontend_score_proxy_forwards_audio(monkeypatch) -> None:
     assert "multipart/form-data" in str(captured["headers"])
     body = captured["data"]
     assert isinstance(body, bytes)
-    assert b'thought' in body
-    assert b'spk-1' in body
-    assert b'noTrim' in body
-    assert b'true' in body
-    assert b'sample.wav' in body
-    assert b'RIFFdemo' in body
+    assert b"thought" in body
+    assert b"spk-1" in body
+    assert b"noTrim" in body
+    assert b"true" in body
+    assert b"sample.wav" in body
+    assert b"RIFFdemo" in body
 
 
 def test_frontend_main_uses_env_backend_url(monkeypatch) -> None:

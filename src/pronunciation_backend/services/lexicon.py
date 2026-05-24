@@ -25,7 +25,7 @@ class LexiconService:
                 word=value["word"],
                 phones=value["phones"],
                 ipa=value["ipa"],
-                reference_audio_id=value["reference_audio_id"],
+                reference_audio_id=value.get("reference_audio_id"),
                 syllables=value.get("syllables", []),
                 stress_pattern=value.get("stress_pattern"),
             )
