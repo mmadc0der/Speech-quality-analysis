@@ -51,6 +51,7 @@ class Settings:
     scorer_compile: bool = field(default_factory=lambda: _env_flag("PRONUNCIATION_SCORER_COMPILE"))
     scorer_compile_mode: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_SCORER_COMPILE_MODE", "reduce-overhead"))
     scorer_checkpoint_path: Path | None = field(default_factory=lambda: _optional_env_path("PRONUNCIATION_SCORER_CHECKPOINT_PATH"))
+    phone_ctc_checkpoint_path: Path | None = field(default_factory=lambda: _optional_env_path("PRONUNCIATION_PHONE_CTC_CHECKPOINT_PATH"))
     mfa_command: str | None = field(default_factory=lambda: _optional_env_value("PRONUNCIATION_MFA_COMMAND"))
     mfa_acoustic_model: str | None = field(default_factory=lambda: _optional_env_value("PRONUNCIATION_MFA_ACOUSTIC_MODEL"))
     mfa_runtime_dictionary_path: Path | None = field(default_factory=lambda: _optional_env_path("PRONUNCIATION_MFA_RUNTIME_DICTIONARY_PATH"))
@@ -77,12 +78,19 @@ class Settings:
     def validate_runtime(self) -> None:
         if self.runtime_backend != "scorer_v2":
             raise ValueError(f"Unsupported runtime backend: {self.runtime_backend}")
-        if self.aligner_backend != "mfa":
+        if self.aligner_backend not in {"mfa", "phone_ctc"}:
             raise ValueError(f"Unsupported aligner backend: {self.aligner_backend}")
         if self.scorer_checkpoint_path is None:
             raise ValueError("PRONUNCIATION_SCORER_CHECKPOINT_PATH must be set for scorer_v2 serving")
         if not self.scorer_checkpoint_path.exists():
             raise FileNotFoundError(f"Configured scorer checkpoint does not exist: {self.scorer_checkpoint_path}")
+        if self.aligner_backend == "phone_ctc":
+            if self.phone_ctc_checkpoint_path is None:
+                raise ValueError("PRONUNCIATION_PHONE_CTC_CHECKPOINT_PATH must be set for phone_ctc alignment")
+            if not self.phone_ctc_checkpoint_path.exists():
+                raise FileNotFoundError(
+                    f"Configured phone CTC checkpoint does not exist: {self.phone_ctc_checkpoint_path}"
+                )
         if not self.use_hf_encoder:
             raise ValueError("PRONUNCIATION_USE_HF_ENCODER=1 is required for scorer_v2 serving")
 

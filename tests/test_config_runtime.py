@@ -38,3 +38,31 @@ def test_validate_runtime_rejects_unknown_aligner_backend(tmp_path: Path) -> Non
 
     with pytest.raises(ValueError, match="Unsupported aligner backend"):
         settings.validate_runtime()
+
+
+def test_validate_runtime_requires_phone_ctc_checkpoint(tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "scorer.pt"
+    checkpoint_path.write_bytes(b"checkpoint")
+    settings = Settings(
+        use_hf_encoder=True,
+        scorer_checkpoint_path=checkpoint_path,
+        aligner_backend="phone_ctc",
+        phone_ctc_checkpoint_path=None,
+    )
+
+    with pytest.raises(ValueError, match="PRONUNCIATION_PHONE_CTC_CHECKPOINT_PATH"):
+        settings.validate_runtime()
+
+
+def test_validate_runtime_rejects_missing_phone_ctc_checkpoint(tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "scorer.pt"
+    checkpoint_path.write_bytes(b"checkpoint")
+    settings = Settings(
+        use_hf_encoder=True,
+        scorer_checkpoint_path=checkpoint_path,
+        aligner_backend="phone_ctc",
+        phone_ctc_checkpoint_path=tmp_path / "missing-phone-ctc.pt",
+    )
+
+    with pytest.raises(FileNotFoundError, match="Configured phone CTC checkpoint does not exist"):
+        settings.validate_runtime()

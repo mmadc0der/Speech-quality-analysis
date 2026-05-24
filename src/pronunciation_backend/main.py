@@ -13,6 +13,7 @@ from pronunciation_backend.services.audio_prep import AudioPrepService, AudioVal
 from pronunciation_backend.services.feature_encoder import SSLFeatureEncoder
 from pronunciation_backend.services.lexicon import LexiconService, UnknownWordError
 from pronunciation_backend.services.mfa_aligner import AlignmentError, MfaForcedAligner
+from pronunciation_backend.services.phone_ctc_aligner import PhoneCtcAligner, PhoneVocabulary
 from pronunciation_backend.services.pipeline import PronunciationPipeline
 from pronunciation_backend.services.reference import ReferenceAudioService
 from pronunciation_backend.services.response_mapper import ResponseMapper
@@ -55,8 +56,6 @@ def _runtime_preflight_entry(active_settings: Settings, pipeline: PronunciationP
 
 def build_pipeline(active_settings: Settings) -> PronunciationPipeline:
     active_settings.validate_runtime()
-    if active_settings.aligner_backend != "mfa":
-        raise ValueError(f"Unsupported aligner backend: {active_settings.aligner_backend}")
     lexicon_service = LexiconService(
         active_settings.lexicon_path,
         cmudict_path=active_settings.cmudict_path,
@@ -80,18 +79,34 @@ def build_pipeline(active_settings: Settings) -> PronunciationPipeline:
             compile_model=active_settings.hf_compile,
             compile_mode=active_settings.hf_compile_mode,
         ),
-        aligner=MfaForcedAligner(
+        aligner=_build_aligner(active_settings, lexicon_service),
+        feature_builder=PhoneFeatureBuilder(),
+        scorer_runtime=scorer_runtime,
+        response_mapper=ResponseMapper(),
+    )
+
+
+def _build_aligner(active_settings: Settings, lexicon_service: LexiconService):
+    if active_settings.aligner_backend == "mfa":
+        return MfaForcedAligner(
             command=active_settings.mfa_command,
             acoustic_model=active_settings.mfa_acoustic_model,
             work_root=active_settings.mfa_work_root,
             timeout_seconds=active_settings.mfa_timeout_seconds,
             runtime_dictionary_path=active_settings.mfa_runtime_dictionary_path,
             clean=active_settings.mfa_clean,
-        ),
-        feature_builder=PhoneFeatureBuilder(),
-        scorer_runtime=scorer_runtime,
-        response_mapper=ResponseMapper(),
-    )
+        )
+    if active_settings.aligner_backend == "phone_ctc":
+        phones = [
+            phone
+            for word in lexicon_service.all_words()
+            for phone in lexicon_service.get_word(word).phones
+        ]
+        return PhoneCtcAligner(
+            checkpoint_path=active_settings.phone_ctc_checkpoint_path,
+            vocabulary=PhoneVocabulary.from_phones(phones),
+        )
+    raise ValueError(f"Unsupported aligner backend: {active_settings.aligner_backend}")
 
 
 def _warm_runtime_pipeline(active_settings: Settings, pipeline: PronunciationPipeline) -> None:
