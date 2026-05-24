@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 
 from fastapi.testclient import TestClient
 
@@ -26,6 +27,39 @@ def test_frontend_index_and_config() -> None:
     config_response = client.get("/api/config")
     assert config_response.status_code == 200
     assert config_response.json()["backend_base_url"] == "http://backend.internal:8000"
+
+
+def test_frontend_health_proxy_reports_backend_network_target(monkeypatch) -> None:
+    def fail_urlopen(*args, **kwargs):
+        del args, kwargs
+        raise urllib.error.URLError(ConnectionRefusedError("connection refused"))
+
+    monkeypatch.setattr(frontend.urllib.request, "urlopen", fail_urlopen)
+    client = TestClient(frontend.create_frontend_app(backend_base_url="http://backend.internal:8000"))
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 502
+    payload = response.json()
+    assert payload["backend_url"] == "http://backend.internal:8000/health"
+    assert "Unable to reach backend URL http://backend.internal:8000/health" in payload["detail"]
+    assert payload["error_type"] == "ConnectionRefusedError"
+
+
+def test_proxy_request_reports_timeout_as_backend_network_error(monkeypatch) -> None:
+    def fail_urlopen(*args, **kwargs):
+        del args, kwargs
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(frontend.urllib.request, "urlopen", fail_urlopen)
+
+    status_code, content, headers = frontend._proxy_request("GET", "http://backend.internal:8000/health")
+
+    payload = json.loads(content)
+    assert status_code == 502
+    assert headers["Content-Type"] == "application/json"
+    assert payload["backend_url"] == "http://backend.internal:8000/health"
+    assert payload["error_type"] == "TimeoutError"
 
 
 

@@ -536,7 +536,15 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function fetchJson(url, options = {}) {
-      const response = await fetch(url, options);
+      let response;
+      try {
+        response = await fetch(url, options);
+      } catch (error) {
+        throw new Error(
+          `Unable to reach debug frontend endpoint ${url}: ${error.message}. ` +
+          "Make sure python -m pronunciation_backend.frontend is running and open this page through that server.",
+        );
+      }
       const contentType = response.headers.get("content-type") || "";
       const payload = contentType.includes("application/json")
         ? await response.json()
@@ -1216,6 +1224,18 @@ def _join_url(base_url: str, path: str) -> str:
     return f"{base_url}{path}"
 
 
+def _backend_network_error(url: str, exc: BaseException) -> tuple[int, bytes, dict[str, str]]:
+    reason = getattr(exc, "reason", exc)
+    payload = json.dumps(
+        {
+            "detail": f"Unable to reach backend URL {url}: {reason}",
+            "backend_url": url,
+            "error_type": type(reason).__name__,
+        }
+    ).encode("utf-8")
+    return 502, payload, {"Content-Type": "application/json"}
+
+
 def _proxy_request(
     method: str,
     url: str,
@@ -1232,8 +1252,9 @@ def _proxy_request(
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read(), dict(exc.headers.items())
     except urllib.error.URLError as exc:
-        payload = json.dumps({"detail": f"Unable to reach backend: {exc.reason}"}).encode("utf-8")
-        return 502, payload, {"Content-Type": "application/json"}
+        return _backend_network_error(url, exc)
+    except OSError as exc:
+        return _backend_network_error(url, exc)
 
 
 def _multipart_body(

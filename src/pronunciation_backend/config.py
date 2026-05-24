@@ -26,11 +26,6 @@ def _optional_env_value(name: str) -> str | None:
     return stripped or None
 
 
-def _env_csv(name: str, default: str = "") -> list[str]:
-    value = os.getenv(name, default)
-    return [item.strip() for item in value.split(",") if item.strip()]
-
-
 @dataclass(frozen=True)
 class Settings:
     sample_rate: int = 16_000
@@ -47,12 +42,6 @@ class Settings:
         default_factory=lambda: os.getenv(
             "PRONUNCIATION_LOG_LEVEL",
             "DEBUG" if _env_flag("DEBUG_MODE") else "INFO",
-        )
-    )
-    cors_origins: list[str] = field(
-        default_factory=lambda: _env_csv(
-            "PRONUNCIATION_CORS_ORIGINS",
-            "*" if _env_flag("DEBUG_MODE") else "",
         )
     )
     runtime_backend: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_RUNTIME_BACKEND", "scorer_v2"))

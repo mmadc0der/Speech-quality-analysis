@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
 
 from pronunciation_backend.config import Settings, settings
 from pronunciation_backend.models import PronunciationAssessmentResponse
@@ -158,14 +157,6 @@ def create_app(
         description="Word-level American English pronunciation assessment backend.",
         lifespan=lifespan,
     )
-    if active_settings.cors_origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=active_settings.cors_origins,
-            allow_credentials=False,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
 
     def get_pipeline_from_request(request: Request) -> PronunciationPipeline:
         pipeline = getattr(request.app.state, "pipeline", None)
