@@ -6,6 +6,11 @@ from typing import Protocol
 import numpy as np
 
 from pronunciation_backend.models import EncodedFrames, LexiconEntry, PhoneFeatures, PhoneSpan, PreparedAudio
+from pronunciation_backend.services.phone_ssl_pooling import (
+    PoolingMode,
+    SSL_BASE_DIM,
+    pool_phone_ssl_features_numpy,
+)
 
 VOWELS = {"AA", "AE", "AH", "AO", "AW", "AY", "EH", "ER", "EY", "IH", "IY", "OW", "OY", "UH", "UW"}
 FRICATIVES = {"DH", "F", "S", "SH", "TH", "V", "Z", "ZH", "HH"}
@@ -109,6 +114,10 @@ class PhonemeAligner(Protocol):
 
 @dataclass
 class PhoneFeatureBuilder:
+    pooling_mode: PoolingMode = "mean"
+    ssl_feature_factor: int = 1
+    ssl_base_dim: int = SSL_BASE_DIM
+
     def build(self, encoded: EncodedFrames, spans: list[PhoneSpan]) -> list[PhoneFeatures]:
         frame_array = np.asarray(encoded.embeddings, dtype=np.float32)
         energy_array = np.asarray(encoded.energy, dtype=np.float32) if encoded.energy.size > 0 else np.zeros((1,), dtype=np.float32)
@@ -128,7 +137,12 @@ class PhoneFeatureBuilder:
                     phoneme=span.phoneme,
                     start_ms=span.start_ms,
                     end_ms=span.end_ms,
-                    mean_embedding=segment.mean(axis=0).astype(np.float32).tolist(),
+                    mean_embedding=pool_phone_ssl_features_numpy(
+                        segment,
+                        pooling_mode=self.pooling_mode,
+                        ssl_feature_factor=self.ssl_feature_factor,
+                        ssl_base_dim=self.ssl_base_dim,
+                    ).tolist(),
                     variance=float(segment.var()),
                     duration_ms=max(1, span.end_ms - span.start_ms),
                     duration_z_score=span.duration_z_score,

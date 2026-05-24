@@ -24,6 +24,7 @@ from pronunciation_backend.training.mmap_dataset import (
     WordMemmapDataset,
     resolve_mmap_dataset_dir,
 )
+from pronunciation_backend.training.v3_architecture import apply_v3_training_defaults
 
 
 def _log(*args, **kwargs) -> None:
@@ -210,6 +211,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ffn-dim", type=int, default=1_536)
     parser.add_argument("--rope-base", type=float, default=10_000.0)
     parser.add_argument("--architecture-version", choices=["v2_compat", "v3"], default="v2_compat")
+    parser.add_argument("--ssl-feature-factor", type=int)
+    parser.add_argument("--pooling-mode", choices=["mean", "subspan_end_concat"])
     parser.add_argument("--block-layout", choices=["sequential_prenorm", "parallel_prenorm"])
     parser.add_argument("--norm-scheme", choices=["rmsnorm", "sandwich_rmsnorm"])
     parser.add_argument("--branch-scale-init", type=float)
@@ -579,6 +582,7 @@ def _save_checkpoint(
 
 def main() -> int:
     args = build_parser().parse_args()
+    apply_v3_training_defaults(args)
     device = torch.device(args.device)
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)

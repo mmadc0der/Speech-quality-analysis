@@ -7,6 +7,12 @@ import numpy as np
 
 from pronunciation_backend.config import Settings
 from pronunciation_backend.models import EncodedFrames, PhoneFeatures, PhoneSpan, PreparedAudio
+from pronunciation_backend.services.phone_ssl_pooling import (
+    PoolingMode,
+    SSL_BASE_DIM,
+    pool_phone_ssl_features_numpy,
+    pool_phone_ssl_features_torch,
+)
 
 try:
     import torch
@@ -31,6 +37,9 @@ class SSLFeatureEncoder:
     """Frozen speech feature extractor for runtime and offline artifact generation."""
 
     settings: Settings
+    pooling_mode: PoolingMode = "mean"
+    ssl_feature_factor: int = 1
+    ssl_base_dim: int = SSL_BASE_DIM
     _processor: object | None = field(default=None, init=False, repr=False)
     _model: object | None = field(default=None, init=False, repr=False)
 
@@ -199,7 +208,13 @@ class SSLFeatureEncoder:
             segment = hidden_tensor[span.start_frame : span.end_frame]
             if segment.numel() == 0:
                 segment = torch.zeros((1, hidden_tensor.shape[-1]), device=hidden_tensor.device, dtype=torch.float32)
-            mean_embedding = segment.mean(dim=0).detach().to("cpu", dtype=torch.float32).tolist()
+            pooled = pool_phone_ssl_features_torch(
+                segment,
+                pooling_mode=self.pooling_mode,
+                ssl_feature_factor=self.ssl_feature_factor,
+                ssl_base_dim=self.ssl_base_dim,
+            )
+            mean_embedding = pooled.detach().to("cpu", dtype=torch.float32).tolist()
             variance = float(segment.var(unbiased=False).item())
             segment_energy = energy[span.start_frame : span.end_frame]
             energy_mean = float(segment_energy.mean()) if segment_energy.size > 0 else 0.0
@@ -243,7 +258,12 @@ class SSLFeatureEncoder:
                     phoneme=span.phoneme,
                     start_ms=span.start_ms,
                     end_ms=span.end_ms,
-                    mean_embedding=segment.mean(axis=0).astype(np.float32).tolist(),
+                    mean_embedding=pool_phone_ssl_features_numpy(
+                        segment,
+                        pooling_mode=self.pooling_mode,
+                        ssl_feature_factor=self.ssl_feature_factor,
+                        ssl_base_dim=self.ssl_base_dim,
+                    ).tolist(),
                     variance=float(segment.var()),
                     duration_ms=max(1, span.end_ms - span.start_ms),
                     duration_z_score=span.duration_z_score,

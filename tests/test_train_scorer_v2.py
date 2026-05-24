@@ -13,8 +13,23 @@ def test_move_batch_to_device_builds_v2_targets() -> None:
         "attention_mask": torch.tensor([[True, True, True]]),
     }
 
-    moved = _move_batch_to_device(batch, torch.device("cpu"))
+    moved = _move_batch_to_device(batch, torch.device("cpu"), acoustic_input_dim=768)
 
     assert moved["acoustic_embeddings"].shape == (1, 3, 768)
     assert torch.equal(moved["class_targets"], torch.tensor([[0, 1, 2]], dtype=torch.long))
     assert torch.equal(moved["omission_targets"], torch.tensor([[0.0, 1.0, 0.0]], dtype=torch.float32))
+
+
+def test_move_batch_to_device_respects_v3_acoustic_input_dim() -> None:
+    batch = {
+        "acoustic_features": torch.randn(1, 2, 1539),
+        "phoneme_ids": torch.tensor([[2, 3]], dtype=torch.long),
+        "match_targets": torch.tensor([[15.0, 60.0]], dtype=torch.float32),
+        "duration_targets": torch.tensor([[15.0, 60.0]], dtype=torch.float32),
+        "presence_targets": torch.tensor([[1.0, 1.0]], dtype=torch.float32),
+        "attention_mask": torch.tensor([[True, True]]),
+    }
+
+    moved = _move_batch_to_device(batch, torch.device("cpu"), acoustic_input_dim=1536)
+
+    assert moved["acoustic_embeddings"].shape == (1, 2, 1536)

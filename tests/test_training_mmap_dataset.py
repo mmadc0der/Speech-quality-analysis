@@ -46,6 +46,20 @@ def _row(utterance_id: str, phoneme: str, index: int, regression_target: float, 
     }
 
 
+def test_pack_and_load_mmap_dataset_with_factor_two_embeddings(tmp_path: Path) -> None:
+    split_dir = tmp_path / "train_v3"
+    split_dir.mkdir()
+    row = _row("utt-1", "HH", 0, 92.0, 0)
+    row["mean_embedding"] = [1.0] * 1536
+    _write_rows(split_dir / "part-0000.jsonl", [row])
+
+    mmap_dir = pack_jsonl_split_to_mmap(split_dir, acoustic_dtype="float32")
+    dataset = WordMemmapDataset(mmap_dir)
+    sample = dataset[0]
+
+    assert sample["acoustic_features"].shape == (1, 1539)
+
+
 def test_pack_and_load_mmap_dataset(tmp_path: Path) -> None:
     split_dir = tmp_path / "train"
     split_dir.mkdir()

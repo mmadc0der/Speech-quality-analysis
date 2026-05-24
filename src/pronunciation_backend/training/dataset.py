@@ -102,8 +102,7 @@ class WordIterableDataset(IterableDataset):
         presence_targets = []
         
         for p in phonemes:
-            # Concat acoustic features (771 dims total)
-            # mean_embedding (768) + variance (1) + duration_z_score (1) + energy_mean (1)
+            # Concat acoustic features: mean_embedding (768 * factor) + 3 scalar features.
             feats = p["mean_embedding"] + [
                 p["variance"], 
                 p["duration_z_score"], 
@@ -124,7 +123,7 @@ class WordIterableDataset(IterableDataset):
             presence_targets.append(1.0 - p["omission_target"])
             
         return {
-            "acoustic_features": torch.tensor(acoustic_features, dtype=torch.float32), # (seq_len, 771)
+            "acoustic_features": torch.tensor(acoustic_features, dtype=torch.float32),
             "phoneme_ids": torch.tensor(phoneme_ids, dtype=torch.long),             # (seq_len,)
             "match_targets": torch.tensor(match_targets, dtype=torch.float32),         # (seq_len,)
             "duration_targets": torch.tensor(duration_targets, dtype=torch.float32),   # (seq_len,)

@@ -30,6 +30,7 @@ def build_pipeline(active_settings: Settings) -> PronunciationPipeline:
         device=active_settings.scorer_device,
         strict_load=active_settings.scorer_strict_load,
     )
+    feature_spec = scorer_runtime.feature_spec()
     return PronunciationPipeline(
         lexicon_service=LexiconService(
             active_settings.lexicon_path,
@@ -37,14 +38,23 @@ def build_pipeline(active_settings: Settings) -> PronunciationPipeline:
         ),
         reference_audio_service=ReferenceAudioService(active_settings.reference_manifest_path),
         audio_prep_service=AudioPrepService(active_settings),
-        feature_encoder=SSLFeatureEncoder(active_settings),
+        feature_encoder=SSLFeatureEncoder(
+            active_settings,
+            pooling_mode=feature_spec.pooling_mode,
+            ssl_feature_factor=feature_spec.ssl_feature_factor,
+            ssl_base_dim=feature_spec.ssl_base_dim,
+        ),
         aligner=MfaForcedAligner(
             command=active_settings.mfa_command,
             acoustic_model=active_settings.mfa_acoustic_model,
             work_root=active_settings.mfa_work_root,
             timeout_seconds=active_settings.mfa_timeout_seconds,
         ),
-        feature_builder=PhoneFeatureBuilder(),
+        feature_builder=PhoneFeatureBuilder(
+            pooling_mode=feature_spec.pooling_mode,
+            ssl_feature_factor=feature_spec.ssl_feature_factor,
+            ssl_base_dim=feature_spec.ssl_base_dim,
+        ),
         scorer_runtime=scorer_runtime,
         response_mapper=ResponseMapper(),
     )

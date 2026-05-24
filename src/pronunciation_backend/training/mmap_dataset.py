@@ -14,9 +14,14 @@ from torch.utils.data import Dataset, Sampler
 from pronunciation_backend.training.dataset import get_phoneme_id
 
 
+from pronunciation_backend.services.phone_ssl_pooling import (
+    DEFAULT_ACOUSTIC_FEATURE_DIM,
+    SCALAR_FEATURE_DIM,
+)
+
 MMAP_SUBDIR = "mmap"
 MMAP_MANIFEST = "manifest.json"
-ACOUSTIC_FEATURE_DIM = 771
+ACOUSTIC_FEATURE_DIM = DEFAULT_ACOUSTIC_FEATURE_DIM
 
 
 class MmapFeatureManifest(BaseModel):
@@ -64,6 +69,12 @@ def _count_rows_and_utterances(jsonl_paths: list[Path]) -> tuple[int, int]:
     return num_rows, num_utterances
 
 
+def _peek_embedding_dim(jsonl_paths: list[Path]) -> int:
+    for row in _iter_json_rows(jsonl_paths):
+        return len(row["mean_embedding"])
+    raise ValueError("No feature rows found in JSONL shards")
+
+
 def pack_jsonl_split_to_mmap(
     features_dir: Path,
     *,
@@ -104,11 +115,14 @@ def pack_jsonl_split_to_mmap(
     if num_rows == 0:
         raise ValueError(f"No feature rows found in {features_dir}")
 
+    embedding_dim = _peek_embedding_dim(jsonl_paths)
+    acoustic_feature_dim = embedding_dim + SCALAR_FEATURE_DIM
+
     acoustic = np.lib.format.open_memmap(
         output_dir / "acoustic_features.npy",
         mode="w+",
         dtype=np.float16 if acoustic_dtype == "float16" else np.float32,
-        shape=(num_rows, ACOUSTIC_FEATURE_DIM),
+        shape=(num_rows, acoustic_feature_dim),
     )
     phoneme_ids = np.lib.format.open_memmap(
         output_dir / "phoneme_ids.npy",
@@ -151,7 +165,8 @@ def pack_jsonl_split_to_mmap(
     utterance_index = 0
     current_utterance_id: str | None = None
 
-    for row in _iter_json_rows(jsonl_paths):
+    def _pack_row(row: dict) -> None:
+        nonlocal row_index, utterance_index, current_utterance_id
         utterance_id = row["utterance_id"]
         if current_utterance_id is None:
             current_utterance_id = utterance_id
@@ -161,13 +176,13 @@ def pack_jsonl_split_to_mmap(
             current_utterance_id = utterance_id
 
         mean_embedding = np.asarray(row["mean_embedding"], dtype=np.float32)
-        if mean_embedding.shape != (ACOUSTIC_FEATURE_DIM - 3,):
+        if mean_embedding.shape != (embedding_dim,):
             raise ValueError(
-                f"Expected mean_embedding to have {ACOUSTIC_FEATURE_DIM - 3} values, "
+                f"Expected mean_embedding to have {embedding_dim} values, "
                 f"got {mean_embedding.shape} for utterance {utterance_id}."
             )
 
-        acoustic[row_index, :-3] = mean_embedding
+        acoustic[row_index, :-SCALAR_FEATURE_DIM] = mean_embedding
         acoustic[row_index, -3] = row["variance"]
         acoustic[row_index, -2] = row["duration_z_score"]
         acoustic[row_index, -1] = row["energy_mean"]
@@ -181,6 +196,9 @@ def pack_jsonl_split_to_mmap(
         if progress_every > 0 and row_index % progress_every == 0:
             print(f"Packed {row_index}/{num_rows} rows...", flush=True)
 
+    for row in _iter_json_rows(jsonl_paths):
+        _pack_row(row)
+
     utterance_offsets[num_utterances] = row_index
 
     acoustic.flush()
@@ -193,6 +211,7 @@ def pack_jsonl_split_to_mmap(
     manifest = MmapFeatureManifest(
         num_rows=row_index,
         num_utterances=num_utterances,
+        acoustic_dim=acoustic_feature_dim,
         acoustic_dtype=acoustic_dtype,
     )
     manifest_path.write_text(json.dumps(manifest.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8")

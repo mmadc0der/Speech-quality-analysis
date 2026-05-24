@@ -4,6 +4,15 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from pronunciation_backend.models import PhoneFeatures
+from pronunciation_backend.services.phone_ssl_pooling import PoolingMode
+
+
+@dataclass(frozen=True)
+class ScorerFeatureSpec:
+    acoustic_input_dim: int
+    ssl_feature_factor: int
+    pooling_mode: PoolingMode
+    ssl_base_dim: int = 768
 
 
 @dataclass(frozen=True)
@@ -40,4 +49,7 @@ class ScorerRuntime(Protocol):
         ...
 
     def model_info(self) -> ScorerModelInfo:
+        ...
+
+    def feature_spec(self) -> ScorerFeatureSpec:
         ...

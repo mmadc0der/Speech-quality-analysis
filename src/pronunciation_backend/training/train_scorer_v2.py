@@ -24,6 +24,7 @@ from pronunciation_backend.training.scoring_targets import (
     CLASS_ORDER,
     CORRECT_THRESHOLD,
 )
+from pronunciation_backend.training.v3_architecture import apply_v3_training_defaults
 
 try:
     from pronunciation_backend.training.parquet_dataset import (
@@ -92,6 +93,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dropout", type=float, default=0.05)
     parser.add_argument("--rope-base", type=float, default=10_000.0)
     parser.add_argument("--architecture-version", choices=["v2_compat", "v3"], default="v2_compat")
+    parser.add_argument("--ssl-feature-factor", type=int)
+    parser.add_argument("--pooling-mode", choices=["mean", "subspan_end_concat"])
+    parser.add_argument("--ssl-base-dim", type=int, default=768)
     parser.add_argument("--block-layout", choices=["sequential_prenorm", "parallel_prenorm"])
     parser.add_argument("--norm-scheme", choices=["rmsnorm", "sandwich_rmsnorm"])
     parser.add_argument("--branch-scale-init", type=float)
@@ -250,7 +254,12 @@ def _build_dataloader(
     )
 
 
-def _move_batch_to_device(batch: dict[str, torch.Tensor], device: torch.device) -> dict[str, torch.Tensor]:
+def _move_batch_to_device(
+    batch: dict[str, torch.Tensor],
+    device: torch.device,
+    *,
+    acoustic_input_dim: int,
+) -> dict[str, torch.Tensor]:
     match_targets = batch["match_targets"]
     class_targets = torch.full_like(match_targets, fill_value=2, dtype=torch.long)
     class_targets = torch.where(
@@ -267,7 +276,9 @@ def _move_batch_to_device(batch: dict[str, torch.Tensor], device: torch.device) 
     presence_targets = batch["presence_targets"]
     omission_targets = 1.0 - presence_targets
     return {
-        "acoustic_embeddings": batch["acoustic_features"][..., :768].to(device, dtype=torch.float32, non_blocking=True),
+        "acoustic_embeddings": batch["acoustic_features"][..., :acoustic_input_dim].to(
+            device, dtype=torch.float32, non_blocking=True
+        ),
         "phoneme_ids": batch["phoneme_ids"].to(device, dtype=torch.long, non_blocking=True),
         "class_targets": class_targets.to(device, dtype=torch.long, non_blocking=True),
         "score_targets": match_targets.to(device, dtype=torch.float32, non_blocking=True),
@@ -301,10 +312,15 @@ def _compute_class_weights(
     dataloader: DataLoader,
     *,
     device: torch.device,
+    acoustic_input_dim: int,
 ) -> torch.Tensor:
     counts = torch.zeros(len(CLASS_ORDER), dtype=torch.long)
     for batch in dataloader:
-        moved = _move_batch_to_device(batch, device=torch.device("cpu"))
+        moved = _move_batch_to_device(
+            batch,
+            device=torch.device("cpu"),
+            acoustic_input_dim=acoustic_input_dim,
+        )
         mask = moved["attention_mask"]
         targets = moved["class_targets"][mask]
         counts += torch.bincount(targets, minlength=len(CLASS_ORDER))
@@ -386,6 +402,7 @@ def _run_epoch(
     model: PhonemeScorerModelV2,
     batches: Iterable[dict[str, torch.Tensor]],
     device: torch.device,
+    acoustic_input_dim: int,
     class_loss_fn: nn.Module,
     omission_loss_fn: nn.Module,
     omission_loss_weight: float,
@@ -414,7 +431,7 @@ def _run_epoch(
             total_words += batch_words
             words_since_log += batch_words
 
-            moved = _move_batch_to_device(batch, device)
+            moved = _move_batch_to_device(batch, device, acoustic_input_dim=acoustic_input_dim)
             mask = moved["attention_mask"]
             logits_mask = mask.unsqueeze(-1)
 
@@ -505,6 +522,7 @@ def _save_checkpoint(
 
 def main() -> int:
     args = build_parser().parse_args()
+    apply_v3_training_defaults(args)
     device = torch.device(args.device)
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -551,7 +569,11 @@ def main() -> int:
         force_mmap=args.force_mmap,
         parquet_preload=args.parquet_preload,
     )
-    class_weights = _compute_class_weights(train_loader, device=device)
+    class_weights = _compute_class_weights(
+        train_loader,
+        device=device,
+        acoustic_input_dim=args.acoustic_input_dim,
+    )
     _log(f"train: class weights={class_weights.detach().cpu().tolist()}")
     optimizer = _build_optimizer(
         model,
@@ -604,6 +626,7 @@ def main() -> int:
             model=model,
             batches=train_loader,
             device=device,
+            acoustic_input_dim=args.acoustic_input_dim,
             class_loss_fn=class_loss_fn,
             omission_loss_fn=omission_loss_fn,
             omission_loss_weight=args.omission_loss_weight,
@@ -629,6 +652,7 @@ def main() -> int:
                 model=model,
                 batches=val_batches,
                 device=device,
+                acoustic_input_dim=args.acoustic_input_dim,
                 class_loss_fn=class_loss_fn,
                 omission_loss_fn=omission_loss_fn,
                 omission_loss_weight=args.omission_loss_weight,

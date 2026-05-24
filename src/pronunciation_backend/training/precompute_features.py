@@ -14,6 +14,10 @@ from pronunciation_backend.models import PhoneSpan, PreparedAudio
 from pronunciation_backend.services.aligner import phone_duration_weight
 from pronunciation_backend.services.audio_prep import AudioPrepService, AudioValidationError
 from pronunciation_backend.services.feature_encoder import SSLFeatureEncoder
+from pronunciation_backend.services.phone_ssl_pooling import (
+    parse_pooling_version,
+    pooling_version_for,
+)
 from pronunciation_backend.training.feature_store import (
     FeaturePrecomputeSpec,
     FeatureStoreLayout,
@@ -35,6 +39,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--embedding-source", required=True, choices=["hubert", "wav2vec2", "fallback"])
     parser.add_argument("--alignment-source", default="mfa", choices=["mfa", "custom_ctc", "manual"])
     parser.add_argument("--pooling-version", default="phone_mean_v1")
+    parser.add_argument("--pooling-mode", choices=["mean", "subspan_end_concat"])
+    parser.add_argument("--ssl-feature-factor", type=int)
     parser.add_argument("--artifact-schema-version", default="phone_embedding_artifact_v1")
     parser.add_argument("--sample-rate", type=int, default=16_000)
     parser.add_argument("--device", default=settings.device)
@@ -52,7 +58,22 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _resolve_pooling_config(args: argparse.Namespace) -> tuple[str, int, str]:
+    if args.pooling_mode is not None or args.ssl_feature_factor is not None:
+        pooling_mode = args.pooling_mode or "mean"
+        ssl_feature_factor = args.ssl_feature_factor or 1
+        pooling_version = pooling_version_for(
+            pooling_mode=pooling_mode,
+            ssl_feature_factor=ssl_feature_factor,
+        )
+        return pooling_mode, ssl_feature_factor, pooling_version
+
+    pooling_mode, ssl_feature_factor = parse_pooling_version(args.pooling_version)
+    return pooling_mode, ssl_feature_factor, args.pooling_version
+
+
 def _spec_from_args(args: argparse.Namespace) -> FeaturePrecomputeSpec:
+    _, _, pooling_version = _resolve_pooling_config(args)
     return FeaturePrecomputeSpec(
         dataset=args.dataset,
         dataset_root=args.dataset_root,
@@ -62,7 +83,7 @@ def _spec_from_args(args: argparse.Namespace) -> FeaturePrecomputeSpec:
         adapter_id=args.adapter_id,
         embedding_source=args.embedding_source,
         alignment_source=args.alignment_source,
-        pooling_version=args.pooling_version,
+        pooling_version=pooling_version,
         artifact_schema_version=args.artifact_schema_version,
         sample_rate=args.sample_rate,
     )
@@ -366,8 +387,13 @@ def main() -> int:
         backbone_id=spec.backbone_id,
         device=args.device,
     )
+    pooling_mode, ssl_feature_factor, _ = _resolve_pooling_config(args)
     audio_prep = AudioPrepService(model_settings)
-    encoder = SSLFeatureEncoder(model_settings)
+    encoder = SSLFeatureEncoder(
+        model_settings,
+        pooling_mode=pooling_mode,  # type: ignore[arg-type]
+        ssl_feature_factor=ssl_feature_factor,
+    )
 
     state_payload = _load_json(state_path)
     state = FeatureStoreState.model_validate(state_payload)
