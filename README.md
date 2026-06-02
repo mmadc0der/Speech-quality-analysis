@@ -51,18 +51,21 @@ For dataset handling, see `docs/dataset_ingestion.md`. The project now follows a
 
 ## Run Backend
 
+Install dependencies (core deps include `torch` and `transformers`; there is no `[ml]` extra):
+
 ```bash
-pip install -e .[dev]
+uv sync --group dev
+uv run uvicorn pronunciation_backend.main:app --reload
+```
+
+Or with pip editable install (runtime only; use `uv sync --group dev` for pytest/httpx):
+
+```bash
+pip install -e .
 uvicorn pronunciation_backend.main:app --reload
 ```
 
-If you also want to experiment with a Hugging Face speech backbone:
-
-```bash
-pip install -e .[ml]
-```
-
-Set `PRONUNCIATION_BACKBONE_ID` to a compatible checkpoint such as a HuBERT or Wav2Vec2 model.
+Set `PRONUNCIATION_BACKBONE_ID` to a compatible Hugging Face checkpoint such as `facebook/hubert-base-ls960` (default).
 
 For the current `scorer_v2` serving path, set the runtime env vars before launch. The backend process stays in the project `uv` environment, while MFA is launched through an explicit external command, typically from micromamba:
 

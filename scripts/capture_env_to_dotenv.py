@@ -13,7 +13,7 @@ Usage (from repo root, after exporting vars in your shell):
   uv run python scripts/capture_env_to_dotenv.py --full   # entire os.environ (large)
 
 PowerShell: run the same command in the same session where you set $env:... variables.
-Bash: run after `source scripts/bake-env.sh` or `export ...`.
+Bash: run after loading `.env` (e.g. `set -a; source .env; set +a`) or `export ...`.
 """
 
 from __future__ import annotations

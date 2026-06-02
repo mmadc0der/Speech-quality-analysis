@@ -30,7 +30,7 @@ Target length: 10–15 pages when exported to PDF or Word. This document is the 
 
 <!-- ~0.5 page -->
 
-This project implements a backend MVP for **American English word-level pronunciation assessment**. Given a known target word and a learner audio recording, the system returns phoneme-level scores, one primary correction target, IPA transcription, and optional reference-audio metadata. Runtime scoring follows an align-based pipeline: lexicon lookup, audio preparation, frozen self-supervised speech encoding (HuBERT-style), Montreal Forced Aligner (MFA) phoneme alignment, phone-level feature pooling, and inference with a trained **scorer v2** neural model. Training is intentionally decoupled from inference: datasets move through `raw → prepared → aligned → features`, a contextual acoustic encoder is optionally pretrained with masked reconstruction, and a supervised phoneme scorer is trained on cached phone-level artifacts. The repository ships a FastAPI backend, optional debug frontend, documented API contract, benchmark scripts, and a pytest suite covering API, pipeline, alignment, and training utilities.
+This project implements a backend MVP for **American English word-level pronunciation assessment**. Given a known target word and a learner audio recording, the system returns phoneme-level scores, one primary correction target, IPA transcription, and optional reference-audio metadata. Runtime scoring follows an align-based pipeline: lexicon lookup, audio preparation, frozen self-supervised speech encoding (HuBERT-style), Montreal Forced Aligner (MFA) phoneme alignment, phone-level feature pooling, and inference with a trained **scorer v2** neural model. Training is intentionally decoupled from inference: datasets move through `raw → prepared → aligned → features`, a contextual acoustic encoder is optionally pretrained with masked reconstruction, and a supervised phoneme scorer is trained on cached phone-level artifacts. The repository ships a FastAPI backend, optional debug frontend, documented API contract, offline eval scripts, and a pytest suite covering API, pipeline, alignment, and training utilities.
 
 **Primary sources:** [README.md](../README.md), [docs/api_contract.md](api_contract.md)
 
@@ -71,7 +71,7 @@ From [README.md](../README.md):
 2. **Modular pipeline** — Lexicon, audio prep, SSL encoder, MFA aligner, feature builder, scorer, response mapper ([pipeline.py](../src/pronunciation_backend/services/pipeline.py)).
 3. **Trained phoneme scorer** — `PhonemeScorerModelV2` with optional two-stage training ([scorer_model_v2.py](../src/pronunciation_backend/training/scorer_model_v2.py)).
 4. **Offline data and training pipeline** — Dataset ingestion, feature precompute, pretraining, supervised training ([docs/dataset_ingestion.md](dataset_ingestion.md), [docs/feature_precompute_pipeline.md](feature_precompute_pipeline.md)).
-5. **Evaluation and benchmark tooling** — Offline checkpoint eval, MFA latency experiments ([eval_scorer_v2_checkpoint.py](../src/pronunciation_backend/training/eval_scorer_v2_checkpoint.py), [docs/mfa_alignment_experiments.md](mfa_alignment_experiments.md)).
+5. **Evaluation tooling** — Offline checkpoint eval and historical MFA latency notes ([eval_scorer_v2_checkpoint.py](../src/pronunciation_backend/training/eval_scorer_v2_checkpoint.py); see §11.4).
 
 ---
 
@@ -620,9 +620,9 @@ No committed pretraining curves exist in the repository.
 
 ### 11.4 Runtime performance evaluation
 
-#### Documented MFA benchmarks (in repository notes)
+#### Documented MFA benchmarks (historical notes)
 
-From [mfa_alignment_experiments.md](mfa_alignment_experiments.md):
+Historical latency notes were captured in an internal `mfa_alignment_experiments.md` document and shell benchmarks that are **not included in this repository**. Approximate figures from those notes:
 
 | Scenario | Approximate latency |
 |----------|---------------------|
@@ -630,10 +630,7 @@ From [mfa_alignment_experiments.md](mfa_alignment_experiments.md):
 | Isolated MFA `align --clean` | ~16.9 s |
 | Isolated MFA `align --no_clean` (reused workspace) | ~9.1 s |
 
-**Scripts:**
-
-- [scripts/benchmark_mfa_cli.sh](../scripts/benchmark_mfa_cli.sh) — CLI MFA matrix
-- [scripts/benchmark_remote_gpu.sh](../scripts/benchmark_remote_gpu.sh) — backend request path (references `pronunciation_backend.benchmark`, which may be deployment-only)
+To reproduce benchmarks today, run MFA and backend scoring manually on your deployment host; there are no committed `scripts/benchmark_*.sh` helpers in git.
 
 #### Recommended future runtime metrics
 
@@ -654,7 +651,7 @@ From [mfa_alignment_experiments.md](mfa_alignment_experiments.md):
 | API contract | test_api + api_contract.md | — |
 | Model accuracy / MAE | eval script exists | Checkpoint + test features on `/cold` |
 | Pretrain quality | train script logs | acoustic_encoder_v2_best.pt |
-| MFA latency | Documented notes | Re-run benchmark scripts on server |
+| MFA latency | Historical notes (§11.4) | Manual timing on deployment host |
 | E2E live scoring | Manual via frontend | GPU server + MFA + checkpoint |
 
 ---
@@ -675,13 +672,13 @@ From [pyproject.toml](../pyproject.toml):
 ### 12.2 Serving the backend
 
 ```bash
-pip install -e .[dev]
+uv sync --group dev
 export PRONUNCIATION_USE_HF_ENCODER=1
 export PRONUNCIATION_SCORER_CHECKPOINT_PATH=/path/to/scorer_v2_best.pt
 export PRONUNCIATION_SCORER_DEVICE=cuda
 export PRONUNCIATION_MFA_COMMAND="/opt/micromamba/bin/micromamba run -n mfa mfa"
 export PRONUNCIATION_MFA_ACOUSTIC_MODEL=english_us_arpa
-uvicorn pronunciation_backend.main:app --host 0.0.0.0 --port 8000
+uv run uvicorn pronunciation_backend.main:app --host 0.0.0.0 --port 8000
 ```
 
 ### 12.3 Key environment variables
@@ -710,13 +707,13 @@ Default roots under `/cold/pronunciation/` for datasets, features, checkpoints, 
 <!-- ~1 page -->
 
 1. **Product scope** — Single known word, `en-US` only; no sentence-level assessment.
-2. **MFA latency** — Subprocess alignment dominates request time (~16 s); interactive UX needs persistent worker or in-process aligner ([mfa_alignment_experiments.md](mfa_alignment_experiments.md)).
+2. **MFA latency** — Subprocess alignment dominates request time (~16 s); interactive UX needs persistent worker or in-process aligner (see historical MFA benchmark notes in §11.4).
 3. **External artifacts** — Datasets, checkpoints, and eval JSON are not versioned in git; results depend on `/cold` storage.
 4. **Score granularity** — v2 expected score is a probability-weighted blend of three anchors (15/60/92), not fine-grained regression.
 5. **Dataset coverage** — L2-ARCTIC and LibriSpeech import-only; SpeechOcean762 primary learner supervision (Mandarin L1 bias).
 6. **Reference audio** — Small curated set; most CMUdict words return `reference: null` ([resources.md](resources.md)).
 7. **Testing gaps** — No CI, no production E2E test with real MFA + GPU + checkpoint.
-8. **Benchmark module** — `benchmark_remote_gpu.sh` may reference code not in all checkouts.
+8. **Benchmark scripts** — `scripts/benchmark_mfa_cli.sh`, `scripts/benchmark_remote_gpu.sh`, and `mfa_alignment_experiments.md` are not in this repository; latency numbers in §11.4 are historical notes only.
 
 **Future work:** Persistent MFA service, CTC/in-process aligner, parquet feature pipeline, speaker adaptation, broader reference library, F1/Spearman/calibration in eval, multi-accent support.
 
@@ -726,7 +723,7 @@ Default roots under `/cold/pronunciation/` for datasets, features, checkpoints, 
 
 <!-- ~0.5 page -->
 
-This repository delivers a **coherent MVP** for phoneme-level pronunciation assessment: a modular FastAPI backend, MFA-based alignment, frozen SSL features at inference, a trainable contextual phoneme scorer with optional two-stage training, and documented data/eval tooling. The architecture cleanly separates **runtime inference** from **offline artifact generation**, enabling fast scorer iteration without re-encoding audio every epoch. Empirical claims about pronunciation quality and production latency require running the documented training and benchmark pipelines on external GPU storage; the codebase provides the methodology, contracts, and tests to support those claims honestly.
+This repository delivers a **coherent MVP** for phoneme-level pronunciation assessment: a modular FastAPI backend, MFA-based alignment, frozen SSL features at inference, a trainable contextual phoneme scorer with optional two-stage training, and documented data/eval tooling. The architecture cleanly separates **runtime inference** from **offline artifact generation**, enabling fast scorer iteration without re-encoding audio every epoch. Empirical claims about pronunciation quality and production latency require running the documented training and eval pipelines on external GPU storage; the codebase provides the methodology, contracts, and tests to support those claims honestly.
 
 ---
 
@@ -799,7 +796,7 @@ Source: [scoring_targets.py](../src/pronunciation_backend/training/scoring_targe
 
 ### Appendix F: MFA benchmark commands
 
-See [mfa_alignment_experiments.md](mfa_alignment_experiments.md) and [scripts/benchmark_mfa_cli.sh](../scripts/benchmark_mfa_cli.sh).
+Historical benchmark commands lived in deployment-only scripts and notes that are not shipped in this repository. See §11.4 for approximate latency figures and run MFA/backend timing manually on your host to reproduce.
 
 ---
 
@@ -839,4 +836,4 @@ See [mfa_alignment_experiments.md](mfa_alignment_experiments.md) and [scripts/be
 | Data | dataset_ingestion.md, feature_precompute_pipeline.md, schemas.py |
 | API | api_contract.md, models.py, test_api.py |
 | Eval | eval_scorer_v2_checkpoint.py, tests/test_eval_scorer_v2_checkpoint.py |
-| Benchmarks | mfa_alignment_experiments.md, scripts/benchmark_*.sh |
+| Benchmarks | §11.4 (historical notes; no benchmark scripts in repo) |
