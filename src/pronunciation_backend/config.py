@@ -38,6 +38,8 @@ class Settings:
     device: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_DEVICE", "cpu"))
     runtime_backend: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_RUNTIME_BACKEND", "scorer_v2"))
     aligner_backend: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_ALIGNER_BACKEND", "mfa"))
+    ctc_model_id: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_CTC_MODEL_ID", "bobboyms/wav2vec2-base-en-phoneme-ctc-41h"))
+    ctc_device: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_CTC_DEVICE", os.getenv("PRONUNCIATION_DEVICE", "cpu")))
     scorer_device: str = field(default_factory=lambda: os.getenv("PRONUNCIATION_SCORER_DEVICE", os.getenv("PRONUNCIATION_DEVICE", "cpu")))
     scorer_strict_load: bool = field(default_factory=lambda: _env_flag("PRONUNCIATION_SCORER_STRICT_LOAD", "1"))
     scorer_checkpoint_path: Path | None = field(default_factory=lambda: _optional_env_path("PRONUNCIATION_SCORER_CHECKPOINT_PATH"))
@@ -63,7 +65,7 @@ class Settings:
     def validate_runtime(self) -> None:
         if self.runtime_backend != "scorer_v2":
             raise ValueError(f"Unsupported runtime backend: {self.runtime_backend}")
-        if self.aligner_backend != "mfa":
+        if self.aligner_backend not in ("mfa", "ctc"):
             raise ValueError(f"Unsupported aligner backend: {self.aligner_backend}")
         if self.scorer_checkpoint_path is None:
             raise ValueError("PRONUNCIATION_SCORER_CHECKPOINT_PATH must be set for scorer_v2 serving")

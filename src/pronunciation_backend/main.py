@@ -22,8 +22,22 @@ logger = logging.getLogger(__name__)
 
 def build_pipeline(active_settings: Settings) -> PronunciationPipeline:
     active_settings.validate_runtime()
-    if active_settings.aligner_backend != "mfa":
+    if active_settings.aligner_backend == "mfa":
+        aligner = MfaForcedAligner(
+            command=active_settings.mfa_command,
+            acoustic_model=active_settings.mfa_acoustic_model,
+            work_root=active_settings.mfa_work_root,
+            timeout_seconds=active_settings.mfa_timeout_seconds,
+        )
+    elif active_settings.aligner_backend == "ctc":
+        from pronunciation_backend.services.ctc_aligner import CtcForcedAligner
+        aligner = CtcForcedAligner(
+            model_id=active_settings.ctc_model_id,
+            device=active_settings.ctc_device,
+        )
+    else:
         raise ValueError(f"Unsupported aligner backend: {active_settings.aligner_backend}")
+
     scorer_runtime = ScorerV2Runtime(
         checkpoint_path=active_settings.scorer_checkpoint_path,
         backbone_id=active_settings.backbone_id,
@@ -38,12 +52,7 @@ def build_pipeline(active_settings: Settings) -> PronunciationPipeline:
         reference_audio_service=ReferenceAudioService(active_settings.reference_manifest_path),
         audio_prep_service=AudioPrepService(active_settings),
         feature_encoder=SSLFeatureEncoder(active_settings),
-        aligner=MfaForcedAligner(
-            command=active_settings.mfa_command,
-            acoustic_model=active_settings.mfa_acoustic_model,
-            work_root=active_settings.mfa_work_root,
-            timeout_seconds=active_settings.mfa_timeout_seconds,
-        ),
+        aligner=aligner,
         feature_builder=PhoneFeatureBuilder(),
         scorer_runtime=scorer_runtime,
         response_mapper=ResponseMapper(),
