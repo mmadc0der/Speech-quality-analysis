@@ -19,6 +19,7 @@ dependencies = [
   # CUDA 12.8 wheels (matches typical Linux drivers reporting CUDA 12.8 in nvidia-smi).
   # Avoid the PyPI default on Linux, which can resolve to CUDA 13.x and fail on older drivers.
   "torch>=2.9.0",
+  "torchaudio>=2.9.0",
   "transformers>=4.44,<5",
 ]
 
@@ -42,6 +43,9 @@ explicit = true
 
 [tool.uv.sources]
 torch = [
+  { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchaudio = [
   { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 
