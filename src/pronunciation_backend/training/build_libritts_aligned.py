@@ -18,7 +18,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-root", required=True)
     parser.add_argument("--prepared-dir", help="Defaults to <dataset-root>/prepared")
     parser.add_argument("--output-dir", help="Defaults to <dataset-root>/aligned")
-    parser.add_argument("--textgrid-root", required=True, help="Root containing MFA TextGrid outputs mirrored to audio paths.")
+    parser.add_argument("--textgrid-root", help="Root containing MFA TextGrid outputs mirrored to audio paths. Required if --alignment-backend is mfa.")
+    parser.add_argument("--alignment-backend", choices=["mfa", "ctc"], default="mfa", help="Alignment backend to use.")
+    parser.add_argument("--ctc-model-id", default="bobboyms/wav2vec2-base-en-phoneme-ctc-41h", help="CTC model ID on HuggingFace.")
+    parser.add_argument("--ctc-device", default="cpu", help="Device for CTC alignment.")
     parser.add_argument("--cmudict-path", required=True)
     parser.add_argument("--sample-rate", type=int, default=24_000)
     parser.add_argument("--word-tier", default="words")
@@ -166,21 +169,32 @@ def main() -> int:
     dataset_root = Path(args.dataset_root)
     prepared_dir = Path(args.prepared_dir) if args.prepared_dir else dataset_root / "prepared"
     output_dir = Path(args.output_dir) if args.output_dir else dataset_root / "aligned"
-    textgrid_root = Path(args.textgrid_root)
     cmudict = load_cmudict(Path(args.cmudict_path))
 
     if not prepared_dir.exists():
         print(f"missing prepared dir: {prepared_dir}")
         return 1
-    if not textgrid_root.exists():
-        print(f"missing textgrid root: {textgrid_root}")
-        return 1
+
+    textgrid_root = None
+    ctc_aligner = None
+    if args.alignment_backend == "mfa":
+        if not args.textgrid_root:
+            print("missing textgrid root (required for mfa backend)")
+            return 1
+        textgrid_root = Path(args.textgrid_root)
+        if not textgrid_root.exists():
+            print(f"missing textgrid root: {textgrid_root}")
+            return 1
+    else:
+        import torchaudio
+        from pronunciation_backend.services.ctc_aligner import CtcForcedAligner
+        ctc_aligner = CtcForcedAligner(args.ctc_model_id, args.ctc_device)
 
     summary: dict[str, object] = {
         "dataset": "libritts",
         "prepared_dir": str(prepared_dir),
         "output_dir": str(output_dir),
-        "textgrid_root": str(textgrid_root),
+        "textgrid_root": str(textgrid_root) if textgrid_root else None,
         "cmudict_path": args.cmudict_path,
         "counts": {},
         "skip_reasons": {},
@@ -194,36 +208,126 @@ def main() -> int:
         started_at = time.monotonic()
 
         for index, prepared in enumerate(rows, start=1):
-            textgrid_path = _resolve_textgrid(textgrid_root, prepared.audio_path)
-            if not textgrid_path.exists():
-                skip_reasons["missing_textgrid"] += 1
-                if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
-                    _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
-                continue
+            if args.alignment_backend == "mfa":
+                assert textgrid_root is not None
+                textgrid_path = _resolve_textgrid(textgrid_root, prepared.audio_path)
+                if not textgrid_path.exists():
+                    skip_reasons["missing_textgrid"] += 1
+                    if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
+                        _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
+                    continue
 
-            try:
-                tiers = parse_textgrid(textgrid_path)
-                word_intervals = _select_tier(tiers, args.word_tier, ("word",))
-                phone_intervals = _select_tier(tiers, args.phone_tier, ("phone",))
-            except KeyError:
-                skip_reasons["missing_tier"] += 1
-                if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
-                    _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
-                continue
+                try:
+                    tiers = parse_textgrid(textgrid_path)
+                    word_intervals = _select_tier(tiers, args.word_tier, ("word",))
+                    phone_intervals = _select_tier(tiers, args.phone_tier, ("phone",))
+                except KeyError:
+                    skip_reasons["missing_tier"] += 1
+                    if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
+                        _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
+                    continue
 
-            for word_interval in word_intervals:
-                artifact, reason = _build_word_artifact(
-                    prepared,
-                    word_interval,
-                    phone_intervals,
-                    cmudict=cmudict,
-                    sample_rate=args.sample_rate,
-                    min_word_ms=args.min_word_ms,
-                )
-                if artifact is not None:
+                for word_interval in word_intervals:
+                    artifact, reason = _build_word_artifact(
+                        prepared,
+                        word_interval,
+                        phone_intervals,
+                        cmudict=cmudict,
+                        sample_rate=args.sample_rate,
+                        min_word_ms=args.min_word_ms,
+                    )
+                    if artifact is not None:
+                        emitted.append(artifact)
+                    elif reason is not None:
+                        skip_reasons[reason] += 1
+            else:
+                # CTC alignment backend
+                assert ctc_aligner is not None
+                words = [normalize_word_token(w) for w in prepared.normalized_text.split()]
+                words = [w for w in words if w and w not in SKIP_WORDS]
+                
+                sentence_phones = []
+                word_phone_slices = []
+                valid = True
+                for w in words:
+                    phones = cmudict.get(w)
+                    if not phones:
+                        valid = False
+                        break
+                    start_idx = len(sentence_phones)
+                    sentence_phones.extend(phones)
+                    end_idx = len(sentence_phones)
+                    word_phone_slices.append((w, start_idx, end_idx))
+                
+                if not valid:
+                    skip_reasons["missing_cmudict"] += 1
+                    if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
+                        _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
+                    continue
+                
+                audio_path = dataset_root / prepared.audio_path
+                if not audio_path.exists():
+                    skip_reasons["missing_audio"] += 1
+                    if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
+                        _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
+                    continue
+                
+                try:
+                    waveform, sr = torchaudio.load(str(audio_path))
+                    if waveform.shape[0] > 1:
+                        waveform = waveform.mean(dim=0, keepdim=True)
+                    if sr != 16000:
+                        waveform = torchaudio.functional.resample(waveform, sr, 16000)
+                    samples = waveform.squeeze(0).numpy()
+                    
+                    aligned_phones = ctc_aligner.align_audio(samples, 16000, sentence_phones)
+                except Exception as exc:
+                    skip_reasons["alignment_failed"] += 1
+                    if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
+                        _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
+                    continue
+                
+                for word, start_idx, end_idx in word_phone_slices:
+                    word_aligned_phones = aligned_phones[start_idx:end_idx]
+                    word_start_ms = word_aligned_phones[0].start_ms
+                    word_end_ms = word_aligned_phones[-1].end_ms
+                    
+                    if word_end_ms - word_start_ms < args.min_word_ms:
+                        skip_reasons["too_short"] += 1
+                        continue
+                    
+                    canonical_phones = [ap.phone for ap in word_aligned_phones]
+                    phone_labels: list[TrainingPhoneLabel] = []
+                    for idx, ap in enumerate(word_aligned_phones):
+                        phone_labels.append(
+                            TrainingPhoneLabel(
+                                phoneme=ap.phone,
+                                index=idx,
+                                start_ms=ap.start_ms,
+                                end_ms=ap.end_ms,
+                                pronunciation_class="correct",
+                                human_score=2.0,
+                                omission_label=False,
+                                pronounced_phone=ap.phone,
+                            )
+                        )
+                    
+                    artifact = TrainingUtteranceArtifact(
+                        utterance_id=f"{prepared.utterance_id}__{word}__{word_start_ms}",
+                        speaker_id=prepared.speaker_id,
+                        dataset="libritts",
+                        split=prepared.split,
+                        target_word=word,
+                        canonical_phones=canonical_phones,
+                        ipa=arpabet_to_ipa(canonical_phones),
+                        audio_path=prepared.audio_path,
+                        sample_rate=args.sample_rate,
+                        duration_ms=word_end_ms - word_start_ms,
+                        audio_quality={"status": "ok", "source": "native_libritts"},
+                        alignment_source="custom_ctc",
+                        phone_labels=phone_labels,
+                    )
                     emitted.append(artifact)
-                elif reason is not None:
-                    skip_reasons[reason] += 1
 
             if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
                 _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)

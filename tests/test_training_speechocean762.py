@@ -246,3 +246,100 @@ def test_prepare_speechocean762_mfa_materializes_mirrored_audio_and_lab(tmp_path
     assert mirrored_audio.exists()
     assert mirrored_audio.read_text(encoding="utf-8") == "fake wav bytes"
     assert mirrored_lab.read_text(encoding="utf-8") == "WE CALL IT BEAR\n"
+
+
+def test_build_speechocean762_aligned_ctc_backend(tmp_path: Path, monkeypatch) -> None:
+    dataset_root = tmp_path / "speechocean762"
+    prepared_dir = dataset_root / "prepared"
+    output_dir = dataset_root / "aligned"
+    raw_root = dataset_root / "raw" / "speechocean762"
+
+    _write_json(
+        raw_root / "resource" / "scores.json",
+        {
+            "utt-test": {
+                "text": "BEAR",
+                "accuracy": 6,
+                "words": [
+                    {
+                        "text": "BEAR",
+                        "phones": "B EH0 R",
+                        "phones-accuracy": [2.0, 1.0, 0.2],
+                        "mispronunciations": [
+                            {
+                                "canonical-phone": "R",
+                                "index": 2,
+                                "pronounced-phone": "<unk>",
+                            }
+                        ],
+                    }
+                ],
+            }
+        },
+    )
+    _write_text(raw_root / "train" / "wav.scp", "")
+    _write_text(raw_root / "test" / "wav.scp", "utt-test WAVE/SPEAKER0003/utt-test.WAV\n")
+
+    prepared_dir.mkdir(parents=True, exist_ok=True)
+    prepared_row = PreparedUtteranceArtifact(
+        utterance_id="utt-test",
+        speaker_id="0003",
+        dataset="speechocean762",
+        split="test",
+        text="BEAR",
+        normalized_text="bear",
+        audio_path="raw/speechocean762/WAVE/SPEAKER0003/utt-test.WAV",
+        transcript_path=None,
+    )
+    _write_text(prepared_dir / "test.jsonl", prepared_row.model_dump_json() + "\n")
+
+    audio_file = dataset_root / prepared_row.audio_path
+    audio_file.parent.mkdir(parents=True, exist_ok=True)
+    audio_file.write_bytes(b"dummy wav bytes")
+
+    import torch
+    class MockCtcForcedAligner:
+        def __init__(self, model_id, device):
+            pass
+        def align_audio(self, samples, sample_rate, arpabet_phones):
+            from pronunciation_backend.services.ctc_aligner import AlignedPhone
+            return [
+                AlignedPhone(phone="B", start_ms=10, end_ms=100, score=0.9),
+                AlignedPhone(phone="EH", start_ms=100, end_ms=200, score=0.8),
+                AlignedPhone(phone="R", start_ms=200, end_ms=300, score=0.7),
+            ]
+
+    import torchaudio
+    monkeypatch.setattr(torchaudio, "load", lambda path: (torch.zeros(1, 16000), 16000))
+    monkeypatch.setattr("pronunciation_backend.services.ctc_aligner.CtcForcedAligner", MockCtcForcedAligner)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_speechocean762_aligned",
+            "--dataset-root",
+            str(dataset_root),
+            "--prepared-dir",
+            str(prepared_dir),
+            "--output-dir",
+            str(output_dir),
+            "--alignment-backend",
+            "ctc",
+            "--overwrite",
+        ],
+    )
+
+    assert build_speechocean762_aligned_main() == 0
+
+    aligned_file = output_dir / "test.jsonl"
+    assert aligned_file.exists()
+    rows = _read_jsonl(aligned_file)
+    assert len(rows) == 1
+    artifact = TrainingUtteranceArtifact.model_validate(rows[0])
+    assert artifact.target_word == "bear"
+    assert artifact.alignment_source == "custom_ctc"
+    assert len(artifact.phone_labels) == 3
+    assert [label.phoneme for label in artifact.phone_labels] == ["B", "EH", "R"]
+    assert [label.start_ms for label in artifact.phone_labels] == [10, 100, 200]
+    assert [label.end_ms for label in artifact.phone_labels] == [100, 200, 300]

@@ -32,7 +32,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-root", required=True)
     parser.add_argument("--prepared-dir", help="Defaults to <dataset-root>/prepared")
     parser.add_argument("--output-dir", help="Defaults to <dataset-root>/aligned")
-    parser.add_argument("--textgrid-root", required=True, help="Root containing MFA TextGrid outputs mirrored to audio paths.")
+    parser.add_argument("--textgrid-root", help="Root containing MFA TextGrid outputs mirrored to audio paths. Required if --alignment-backend is mfa.")
+    parser.add_argument("--alignment-backend", choices=["mfa", "ctc"], default="mfa", help="Alignment backend to use.")
+    parser.add_argument("--ctc-model-id", default="bobboyms/wav2vec2-base-en-phoneme-ctc-41h", help="CTC model ID on HuggingFace.")
+    parser.add_argument("--ctc-device", default="cpu", help="Device for CTC alignment.")
     parser.add_argument("--sample-rate", type=int, default=16_000)
     parser.add_argument("--word-tier", default="words")
     parser.add_argument("--phone-tier", default="phones")
@@ -194,22 +197,33 @@ def main() -> int:
     dataset_root = Path(args.dataset_root)
     prepared_dir = Path(args.prepared_dir) if args.prepared_dir else dataset_root / "prepared"
     output_dir = Path(args.output_dir) if args.output_dir else dataset_root / "aligned"
-    textgrid_root = Path(args.textgrid_root)
     raw_root = resolve_speechocean_raw_root(dataset_root)
     scores = load_scores(resolve_scores_path(raw_root))
 
     if not prepared_dir.exists():
         print(f"missing prepared dir: {prepared_dir}")
         return 1
-    if not textgrid_root.exists():
-        print(f"missing textgrid root: {textgrid_root}")
-        return 1
+
+    textgrid_root = None
+    ctc_aligner = None
+    if args.alignment_backend == "mfa":
+        if not args.textgrid_root:
+            print("missing textgrid root (required for mfa backend)")
+            return 1
+        textgrid_root = Path(args.textgrid_root)
+        if not textgrid_root.exists():
+            print(f"missing textgrid root: {textgrid_root}")
+            return 1
+    else:
+        import torchaudio
+        from pronunciation_backend.services.ctc_aligner import CtcForcedAligner
+        ctc_aligner = CtcForcedAligner(args.ctc_model_id, args.ctc_device)
 
     summary: dict[str, object] = {
         "dataset": "speechocean762",
         "prepared_dir": str(prepared_dir),
         "output_dir": str(output_dir),
-        "textgrid_root": str(textgrid_root),
+        "textgrid_root": str(textgrid_root) if textgrid_root else None,
         "raw_root": str(raw_root),
         "counts": {},
         "skip_reasons": {},
@@ -226,53 +240,154 @@ def main() -> int:
             score_entry = scores.get(prepared.utterance_id)
             if score_entry is None:
                 skip_reasons["missing_score_entry"] += 1
-                continue
-
-            textgrid_path = _resolve_textgrid(textgrid_root, prepared.audio_path)
-            if not textgrid_path.exists():
-                skip_reasons["missing_textgrid"] += 1
                 if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
                     _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
                 continue
 
-            try:
-                tiers = parse_textgrid(textgrid_path)
-                word_intervals = _textgrid_words(_select_tier(tiers, args.word_tier, ("word",)))
-                phone_intervals = _select_tier(tiers, args.phone_tier, ("phone",))
-            except KeyError:
-                skip_reasons["missing_tier"] += 1
-                if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
-                    _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
-                continue
+            if args.alignment_backend == "mfa":
+                assert textgrid_root is not None
+                textgrid_path = _resolve_textgrid(textgrid_root, prepared.audio_path)
+                if not textgrid_path.exists():
+                    skip_reasons["missing_textgrid"] += 1
+                    if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
+                        _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
+                    continue
 
-            score_words = _scored_words(score_entry)
-            if len(score_words) != len(word_intervals):
-                skip_reasons["word_count_mismatch"] += 1
-                if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
-                    _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
-                continue
+                try:
+                    tiers = parse_textgrid(textgrid_path)
+                    word_intervals = _textgrid_words(_select_tier(tiers, args.word_tier, ("word",)))
+                    phone_intervals = _select_tier(tiers, args.phone_tier, ("phone",))
+                except KeyError:
+                    skip_reasons["missing_tier"] += 1
+                    if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
+                        _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
+                    continue
 
-            normalized_score_words = [normalize_score_word_text(str(word["text"])) for word in score_words]
-            normalized_intervals = [normalize_score_word_text(interval.text) for interval in word_intervals]
-            if normalized_score_words != normalized_intervals:
-                skip_reasons["word_identity_mismatch"] += 1
-                if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
-                    _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
-                continue
+                score_words = _scored_words(score_entry)
+                if len(score_words) != len(word_intervals):
+                    skip_reasons["word_count_mismatch"] += 1
+                    if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
+                        _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
+                    continue
 
-            for score_word, word_interval in zip(score_words, word_intervals):
-                artifact, reason = _build_word_artifact(
-                    prepared,
-                    score_word,
-                    word_interval,
-                    phone_intervals,
-                    sample_rate=args.sample_rate,
-                    min_word_ms=args.min_word_ms,
-                )
-                if artifact is not None:
+                normalized_score_words = [normalize_score_word_text(str(word["text"])) for word in score_words]
+                normalized_intervals = [normalize_score_word_text(interval.text) for interval in word_intervals]
+                if normalized_score_words != normalized_intervals:
+                    skip_reasons["word_identity_mismatch"] += 1
+                    if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
+                        _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
+                    continue
+
+                for score_word, word_interval in zip(score_words, word_intervals):
+                    artifact, reason = _build_word_artifact(
+                        prepared,
+                        score_word,
+                        word_interval,
+                        phone_intervals,
+                        sample_rate=args.sample_rate,
+                        min_word_ms=args.min_word_ms,
+                    )
+                    if artifact is not None:
+                        emitted.append(artifact)
+                    elif reason is not None:
+                        skip_reasons[reason] += 1
+            else:
+                # CTC alignment backend
+                assert ctc_aligner is not None
+                score_words = _scored_words(score_entry)
+                
+                sentence_phones = []
+                word_phone_slices = []
+                valid = True
+                for score_word in score_words:
+                    try:
+                        phones = canonical_phones_from_word(score_word)
+                    except Exception:
+                        valid = False
+                        break
+                    start_idx = len(sentence_phones)
+                    sentence_phones.extend(phones)
+                    end_idx = len(sentence_phones)
+                    word_phone_slices.append((score_word, start_idx, end_idx))
+                
+                if not valid:
+                    skip_reasons["missing_phones"] += 1
+                    if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
+                        _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
+                    continue
+                
+                audio_path = dataset_root / prepared.audio_path
+                if not audio_path.exists():
+                    skip_reasons["missing_audio"] += 1
+                    if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
+                        _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
+                    continue
+                
+                try:
+                    waveform, sr = torchaudio.load(str(audio_path))
+                    if waveform.shape[0] > 1:
+                        waveform = waveform.mean(dim=0, keepdim=True)
+                    if sr != 16000:
+                        waveform = torchaudio.functional.resample(waveform, sr, 16000)
+                    samples = waveform.squeeze(0).numpy()
+                    
+                    aligned_phones = ctc_aligner.align_audio(samples, 16000, sentence_phones)
+                except Exception as exc:
+                    skip_reasons["alignment_failed"] += 1
+                    if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
+                        _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
+                    continue
+                
+                for score_word, start_idx, end_idx in word_phone_slices:
+                    word_aligned_phones = aligned_phones[start_idx:end_idx]
+                    word_start_ms = word_aligned_phones[0].start_ms
+                    word_end_ms = word_aligned_phones[-1].end_ms
+                    
+                    if word_end_ms - word_start_ms < args.min_word_ms:
+                        skip_reasons["too_short"] += 1
+                        continue
+                    
+                    normalized_word = normalize_score_word_text(str(score_word["text"]))
+                    canonical_phones = [ap.phone for ap in word_aligned_phones]
+                    phone_scores = phone_scores_from_word(score_word)
+                    
+                    if len(canonical_phones) != len(phone_scores):
+                        skip_reasons["phone_score_length_mismatch"] += 1
+                        continue
+                    
+                    mispronunciations = mispronunciations_by_index(score_word)
+                    phone_labels: list[TrainingPhoneLabel] = []
+                    for idx, (ap, human_score) in enumerate(zip(word_aligned_phones, phone_scores)):
+                        pronounced_phone = mispronunciations.get(idx)
+                        phone_labels.append(
+                            TrainingPhoneLabel(
+                                phoneme=ap.phone,
+                                index=idx,
+                                start_ms=ap.start_ms,
+                                end_ms=ap.end_ms,
+                                pronunciation_class=pronunciation_class_from_score(human_score),  # type: ignore[arg-type]
+                                human_score=human_score,
+                                omission_label=is_omission_pronunciation(pronounced_phone),
+                                pronounced_phone=pronounced_phone,
+                            )
+                        )
+                    
+                    artifact = TrainingUtteranceArtifact(
+                        utterance_id=f"{prepared.utterance_id}__{normalized_word}__{word_start_ms}",
+                        speaker_id=prepared.speaker_id,
+                        dataset="speechocean762",
+                        split=prepared.split,
+                        target_word=normalized_word,
+                        canonical_phones=canonical_phones,
+                        ipa=arpabet_to_ipa(canonical_phones),
+                        audio_path=prepared.audio_path,
+                        sample_rate=args.sample_rate,
+                        duration_ms=word_end_ms - word_start_ms,
+                        audio_quality={"status": "ok", "source": "speechocean762"},
+                        alignment_source="custom_ctc",
+                        phone_labels=phone_labels,
+                    )
                     emitted.append(artifact)
-                elif reason is not None:
-                    skip_reasons[reason] += 1
 
             if args.progress_every > 0 and (index % args.progress_every == 0 or index == len(rows)):
                 _print_progress(split=split, processed=index, total=len(rows), emitted=len(emitted), started_at=started_at)
