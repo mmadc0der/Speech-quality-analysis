@@ -7,6 +7,7 @@ import torchaudio.functional as F
 from dataclasses import dataclass
 from pathlib import Path
 from math import ceil, floor
+import math
 import numpy as np
 
 from transformers import AutoProcessor, AutoModelForCTC
@@ -162,12 +163,18 @@ class CtcForcedAligner:
             end_ms = int(round(span.end * frame_duration_ms))
             end_ms = max(start_ms + 1, end_ms)
             
+            # span.score can be a float (standard torchaudio) or a Tensor
+            score_val = span.score
+            if hasattr(score_val, "item"):
+                score_val = score_val.item()
+            prob = math.exp(float(score_val))
+
             aligned_phones.append(
                 AlignedPhone(
                     phone=arpabet_phones[index],
                     start_ms=start_ms,
                     end_ms=end_ms,
-                    score=float(span.score.exp().item()),  # convert log prob back to probability
+                    score=prob,  # convert log prob back to probability
                 )
             )
         return aligned_phones
