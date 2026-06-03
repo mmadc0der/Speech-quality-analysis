@@ -1,0 +1,109 @@
+flowchart TD
+  classDef input fill:#eef6ff,stroke:#2f80ed,color:#0b2545
+  classDef tensor fill:#f8fbff,stroke:#8ab4f8,color:#0b2545
+  classDef model fill:#f3ecff,stroke:#7b61ff,color:#24123d
+  classDef block fill:#fff8e8,stroke:#f2a900,color:#3d2c00
+  classDef head fill:#eafff2,stroke:#27ae60,color:#0f3b22
+  classDef loss fill:#fff0f0,stroke:#eb5757,color:#4a1010
+  classDef artifact fill:#f5f5f5,stroke:#828282,color:#222
+
+  subgraph sources["Input Sources"]
+    runtimePhones["Runtime: PhoneFeatures list<br/>phoneme, timings, mean_embedding, confidence"]:::input
+    trainBatch["Training: word batches<br/>acoustic_features, phoneme_ids,<br/>match_targets, presence_targets, attention_mask"]:::input
+  end
+
+  runtimePhones --> tensorMapper["PhoneFeatureTensorMapper<br/>mean_embedding[:768] + get_phoneme_id"]:::block
+  tensorMapper --> rtInputs["Runtime model inputs<br/>acoustic_embeddings [1, seq, 768]<br/>phoneme_ids [1, seq]<br/>attention_mask [1, seq]"]:::tensor
+
+  trainBatch --> moveBatch["_move_batch_to_device<br/>acoustic_features[..., :768]<br/>match score -> 3-class target<br/>presence -> omission target"]:::block
+  moveBatch --> trInputs["Training model inputs<br/>acoustic_embeddings [batch, seq, 768]<br/>phoneme_ids [batch, seq]<br/>attention_mask [batch, seq]"]:::tensor
+  moveBatch --> targets["Training targets<br/>quality class: wrong_or_missed | accented | correct<br/>omission target: 1 - presence<br/>score target for MAE metric"]:::loss
+
+  rtInputs --> modelInputs
+  trInputs --> modelInputs
+
+  subgraph scorer["PhonemeScorerModelV2"]
+    modelInputs["Shared forward inputs"]:::tensor
+    acousticIn["acoustic_embeddings<br/>768-d HuBERT-style phoneme vectors"]:::tensor
+    phonemeIn["phoneme_ids<br/>target phoneme sequence"]:::tensor
+    maskIn["attention_mask<br/>valid phoneme positions"]:::tensor
+
+    modelInputs --> acousticIn
+    modelInputs --> phonemeIn
+    modelInputs --> maskIn
+
+    subgraph acousticEncoder["AcousticEncoderV2<br/>default: 6 layers, d_model=384, heads=6"]
+      acousticPrep["RMSNorm(768) -> Linear 768 to d_model -> Dropout<br/>masked positions zeroed by attention_mask"]:::model
+      acousticBlocks["Repeat AcousticEncoderBlock x acoustic_layers"]:::block
+      acousticFinal["Final RMSNorm<br/>mask padded positions"]:::model
+      acousticPrep --> acousticBlocks --> acousticFinal
+    end
+
+    subgraph encoderBlock["AcousticEncoderBlock internals"]
+      blockLayout{"block_layout"}:::block
+      seqPath["v2_compat default:<br/>sequential prenorm"]:::block
+      parPath["v3 option:<br/>parallel prenorm + sandwich RMSNorm + LayerScale"]:::block
+      attn["Self-attention branch<br/>Q/K/V linear projections<br/>RoPE positions<br/>optional QK normalization<br/>scaled dot-product attention"]:::model
+      ffn["SwiGLU feed-forward branch<br/>gate_proj * up_proj -> down_proj"]:::model
+      residualMask["Residual add<br/>apply attention_mask"]:::model
+      blockLayout --> seqPath --> attn
+      blockLayout --> parPath --> attn
+      attn --> residualMask
+      ffn --> residualMask
+    end
+
+    acousticBlocks -. uses .-> encoderBlock
+    acousticIn --> acousticPrep
+    maskIn --> acousticPrep
+    maskIn --> acousticBlocks
+
+    acousticFinal --> acousticState["acoustic_state<br/>[batch, seq, d_model]"]:::tensor
+
+    phonemeIn --> phoneEmbed["Embedding vocab 42 -> 48<br/>padding_idx=0"]:::model
+    phoneEmbed --> phoneProj["RMSNorm(48) -> Linear 48 to d_model -> Dropout"]:::model
+    phoneProj --> phonemeState["phoneme_state<br/>[batch, seq, d_model]"]:::tensor
+
+    acousticState --> fusionCat
+    phonemeState --> fusionCat
+    fusionCat["Feature fusion concat<br/>acoustic_state<br/>phoneme_state<br/>acoustic_state - phoneme_state<br/>acoustic_state * phoneme_state<br/>=> 4 * d_model"]:::model
+    fusionCat --> fusionProj["RMSNorm(4*d_model) -> Linear 4*d_model to d_model -> Dropout<br/>mask padded positions"]:::model
+
+    fusionProj --> scorerBlocks["Repeat AcousticEncoderBlock x scorer_layers<br/>default: 2 contextual scorer layers"]:::block
+    scorerBlocks -. uses .-> encoderBlock
+    maskIn --> scorerBlocks
+
+    scorerBlocks --> outputNorm["Output RMSNorm<br/>mask padded positions"]:::model
+    outputNorm --> qualityHead["quality_head<br/>Linear d_model to 3 logits"]:::head
+    outputNorm --> omissionHead["omission_head<br/>Linear d_model to 1 logit"]:::head
+
+    qualityHead --> classProbs["softmax quality logits<br/>class_probs"]:::head
+    classProbs --> expectedScore["expected_score<br/>class_probs dot [15, 60, 92]<br/>masked"]:::head
+    classProbs --> expectedHuman["expected_human_score<br/>class_probs dot [0, 1, 2]<br/>masked"]:::head
+    omissionHead --> omissionLogit["omission_logit<br/>sigmoid at runtime"]:::head
+  end
+
+  subgraph trainingLoop["Training Objective"]
+    qualityLoss["CrossEntropyLoss<br/>quality_logits vs class_targets<br/>class-weighted, masked"]:::loss
+    omissionLoss["BCEWithLogitsLoss<br/>omission_logit vs omission_target<br/>masked"]:::loss
+    totalLoss["objective_loss<br/>quality_loss + omission_loss_weight * omission_loss<br/>AdamW + grad clip 1.0"]:::loss
+    checkpoint["Checkpoint artifact<br/>model_state_dict, optimizer_state_dict,<br/>metrics, class_weights, config"]:::artifact
+    qualityLoss --> totalLoss --> checkpoint
+    omissionLoss --> totalLoss
+  end
+
+  qualityHead --> qualityLoss
+  omissionHead --> omissionLoss
+  targets --> qualityLoss
+  targets --> omissionLoss
+
+  subgraph runtimeOutput["Runtime Output"]
+    predictions["ScorerPhonePrediction per phoneme<br/>predicted_class argmax<br/>quality_class_probs<br/>expected_score<br/>expected_human_score<br/>omission_probability<br/>timings + alignment_confidence"]:::artifact
+    modelInfo["ScorerModelInfo<br/>runtime_backend=scorer_v2<br/>model_version=v2 or v3<br/>checkpoint, backbone, device, class labels"]:::artifact
+  end
+
+  classProbs --> predictions
+  expectedScore --> predictions
+  expectedHuman --> predictions
+  omissionLogit --> predictions
+  runtimePhones --> predictions
+  checkpoint --> modelInfo

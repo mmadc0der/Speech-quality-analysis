@@ -4,3 +4,6 @@ __pycache__
 .pronunciation_dataset_map.json
 /*.json
 *.egg-info/
+
+# Derived build outputs under docs/ (zip bundles for PPTX, kept locally, not tracked)
+docs/**/*.zip

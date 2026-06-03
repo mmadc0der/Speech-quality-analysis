@@ -1,0 +1,46 @@
+<mxfile host="app.diagrams.net" version="24.0.0">
+  <diagram id="scoring" name="Итоговые баллы">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="850" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Постобработка → итоговые баллы (response_mapper.py)" style="text;html=1;align=center;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="250" y="20" width="600" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="pred" value="Предсказания по фонемам (ScorerPhonePrediction)&#10;expected_score, expected_human_score,&#10;quality_class_probs, omission_probability,&#10;predicted_class, alignment_confidence, тайминги" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eafff2;strokeColor=#27ae60;fontColor=#0f3b22;" vertex="1" parent="1">
+          <mxGeometry x="350" y="90" width="400" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="conf" value="Confidence по фонеме&#10;0.7·class_conf + 0.3·alignment_conf&#10;× множитель качества аудио&#10;(ok 1.0 / low 0.9 / rejected 0.75)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f2ebff;strokeColor=#7b61ff;fontColor=#24123d;" vertex="1" parent="1">
+          <mxGeometry x="60" y="250" width="300" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="overall" value="overall_score (балл за слово)&#10;взвешенное среднее expected_score&#10;вес = длительность × (0.5 + 0.5·alignment_conf)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f2ebff;strokeColor=#7b61ff;fontColor=#24123d;" vertex="1" parent="1">
+          <mxGeometry x="400" y="250" width="300" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="issue" value="primary_issue&#10;худшая фонема по severity&#10;(низкий score, omission_probability,&#10;низкий confidence, штраф класса)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f2ebff;strokeColor=#7b61ff;fontColor=#24123d;" vertex="1" parent="1">
+          <mxGeometry x="740" y="250" width="300" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="resp" value="PronunciationAssessmentResponse (JSON)&#10;word, ipa, overall_score, confidence,&#10;audio_quality, phonemes[], primary_issue,&#10;reference, model_info" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f3f3;strokeColor=#777777;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="350" y="440" width="400" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ui" value="Пользователь видит баллы&#10;(браузер / ответ API)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf4ff;strokeColor=#2f80ed;fontColor=#0b2545;" vertex="1" parent="1">
+          <mxGeometry x="430" y="630" width="240" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="pred" target="conf"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="s2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="pred" target="overall"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="s3" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="pred" target="issue"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="s4" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="conf" target="resp"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="s5" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="overall" target="resp"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="s6" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="issue" target="resp"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="s7" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="resp" target="ui"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

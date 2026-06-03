@@ -1,0 +1,68 @@
+<mxfile host="app.diagrams.net" version="24.0.0">
+  <diagram id="capture" name="Запись и препроцессинг">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="1300" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Запись аудио и препроцессинг" style="text;html=1;align=center;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="200" y="20" width="500" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b_front" value="Браузер (frontend.py)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eaf4ff;strokeColor=#2f80ed;fontColor=#0b2545;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="120" y="90" width="660" height="290" as="geometry" />
+        </mxCell>
+        <mxCell id="c1" value="Микрофон&#10;getUserMedia({ audio: true })" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2f80ed;" vertex="1" parent="1">
+          <mxGeometry x="350" y="120" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="c2" value="AudioContext + ScriptProcessor&#10;накопление Float32 чанков" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2f80ed;" vertex="1" parent="1">
+          <mxGeometry x="350" y="210" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="c3" value="encodeWav()&#10;16-бит PCM WAV, моно&#10;(опц. обрезка по мс)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2f80ed;" vertex="1" parent="1">
+          <mxGeometry x="350" y="300" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="api" value="POST /v1/pronunciation/score&#10;FormData: word, audio (WAV), noTrim" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff4d6;strokeColor=#f2a900;fontColor=#3d2c00;" vertex="1" parent="1">
+          <mxGeometry x="320" y="410" width="260" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b_prep" value="Препроцессинг (audio_prep.py)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f2ebff;strokeColor=#7b61ff;fontColor=#24123d;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="120" y="500" width="660" height="500" as="geometry" />
+        </mxCell>
+        <mxCell id="p1" value="Декодирование (soundfile) → float32" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7b61ff;" vertex="1" parent="1">
+          <mxGeometry x="320" y="530" width="260" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p2" value="В моно (среднее по каналам)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7b61ff;" vertex="1" parent="1">
+          <mxGeometry x="320" y="600" width="260" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p3" value="Ресемплинг → 16 000 Гц" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7b61ff;" vertex="1" parent="1">
+          <mxGeometry x="320" y="670" width="260" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p4" value="Нормализация (пик → 1.0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7b61ff;" vertex="1" parent="1">
+          <mxGeometry x="320" y="740" width="260" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p5" value="Обрезка тишины по энергии&#10;(RMS, кадры 20 мс) — если не noTrim" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7b61ff;" vertex="1" parent="1">
+          <mxGeometry x="320" y="810" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p6" value="Оценка качества&#10;rms, clipping, silence, SNR →&#10;ok / low_confidence / rejected" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7b61ff;" vertex="1" parent="1">
+          <mxGeometry x="320" y="890" width="260" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="out" value="PreparedAudio&#10;моно float32, 16 кГц + audio_quality" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fbff;strokeColor=#6b9df2;fontColor=#0b2545;" vertex="1" parent="1">
+          <mxGeometry x="320" y="1030" width="260" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ec1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="c1" target="c2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ec2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="c2" target="c3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ec3" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="c3" target="api"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ec4" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="api" target="p1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="p1" target="p2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="p2" target="p3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep3" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="p3" target="p4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep4" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="p4" target="p5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep5" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="p5" target="p6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep6" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="p6" target="out"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

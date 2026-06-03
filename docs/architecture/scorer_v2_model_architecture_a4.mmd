@@ -1,0 +1,120 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Arial, sans-serif","fontSize":"26px","primaryTextColor":"#111111","lineColor":"#555555","clusterBkg":"#fffdf0","clusterBorder":"#c8b96a"},"flowchart":{"htmlLabels":true,"nodeSpacing":18,"rankSpacing":24,"padding":8,"curve":"basis"}}}%%
+flowchart LR
+  classDef input fill:#eaf4ff,stroke:#2f80ed,color:#0b2545,stroke-width:2px
+  classDef tensor fill:#f8fbff,stroke:#6b9df2,color:#0b2545,stroke-width:2px
+  classDef model fill:#f2ebff,stroke:#7b61ff,color:#24123d,stroke-width:2px
+  classDef block fill:#fff4d6,stroke:#f2a900,color:#3d2c00,stroke-width:2px
+  classDef head fill:#eafff2,stroke:#27ae60,color:#0f3b22,stroke-width:2px
+  classDef train fill:#fff0f0,stroke:#eb5757,color:#4a1010,stroke-width:2px
+  classDef out fill:#f3f3f3,stroke:#777777,color:#222222,stroke-width:2px
+  classDef note fill:#ffffff,stroke:#9a8f4f,color:#222222,stroke-width:1px
+  classDef title fill:transparent,stroke:transparent,color:#222222,font-weight:bold
+  classDef ghost fill:transparent,stroke:transparent,color:transparent
+
+  subgraph data["Inputs and Tensorization"]
+    direction TB
+    A["Runtime<br/><b>PhoneFeatures</b><br/>phoneme, timing,<br/>mean_embedding"]:::input
+    C["Tensor mapper<br/>mean_embedding[:768]<br/>phoneme -> id"]:::block
+    B["Training<br/><b>Word batch</b><br/>features, ids,<br/>targets, mask"]:::input
+    D["Batch mapper<br/>features[..., :768]<br/>score -> class<br/>presence -> omission"]:::block
+    E["Model tensors<br/><b>acoustic</b> [B,S,768]<br/><b>phoneme_ids</b> [B,S]<br/><b>attention_mask</b> [B,S]"]:::tensor
+    A --> C
+    B --> D
+    C --> E
+    D --> E
+  end
+
+  subgraph scorer[" "]
+    direction TB
+
+    subgraph path["PhonemeScorerModelV2 - Model Data Path"]
+      direction LR
+      IN["Shared forward inputs<br/>acoustic_embeddings<br/>phoneme_ids<br/>attention_mask"]:::tensor
+
+      subgraph streams["Parallel Input Streams"]
+        direction TB
+        F["Acoustic stream<br/>RMSNorm 768<br/>Linear 768 -> d<br/>Dropout + attention mask"]:::model
+        G["AcousticEncoderV2<br/>AcousticEncoderBlock x acoustic_layers<br/><b>default 6</b>"]:::block
+        H["acoustic_state<br/>Final RMSNorm<br/>masked [B,S,d]"]:::tensor
+        M["Target phoneme stream<br/>Embedding vocab 42 -> 48<br/>padding_idx=0"]:::model
+        N["Phoneme projection<br/>RMSNorm 48<br/>Linear 48 -> d<br/>Dropout"]:::model
+        O["phoneme_state<br/>[B,S,d]"]:::tensor
+        F --> G --> H
+        M --> N --> O
+      end
+
+      subgraph fusion["Fusion and Contextual Scorer"]
+        direction TB
+        P["Feature fusion concat<br/>acoustic_state<br/>phoneme_state<br/>acoustic_state - phoneme_state<br/>acoustic_state * phoneme_state<br/><b>4d</b>"]:::model
+        Q["Fusion projection<br/>RMSNorm 4d<br/>Linear 4d -> d<br/>Dropout + mask"]:::model
+        R["Contextual scorer<br/>AcousticEncoderBlock x scorer_layers<br/><b>default 2</b>"]:::block
+        S["Output state<br/>RMSNorm<br/>masked tokens"]:::model
+        P --> Q --> R --> S
+      end
+
+      subgraph hd["Per-Phoneme Prediction Heads"]
+        direction TB
+        T["Quality head<br/>Linear d -> 3 logits"]:::head
+        V["Class probabilities<br/>softmax over<br/>wrong_or_missed | accented | correct"]:::head
+        W["Expected score<br/>class_probs dot [15, 60, 92]"]:::head
+        X["Expected human score<br/>class_probs dot [0, 1, 2]"]:::head
+        U["Omission head<br/>Linear d -> 1 logit"]:::head
+        Y["Omission probability<br/>sigmoid at runtime"]:::head
+        T --> V
+        V --> W
+        V --> X
+        U --> Y
+      end
+
+      IN --> F
+      IN --> M
+      H --> P
+      O --> P
+      S --> T
+      S --> U
+    end
+
+  end
+
+  subgraph enc[" "]
+    direction TB
+    ET["Reusable Encoder Block"]:::title
+    EG[" "]:::ghost
+    I["AcousticEncoderBlock detail<br/>used by acoustic + scorer stacks<br/><br/>Layout options<br/>v2_compat: sequential prenorm<br/>v3: parallel prenorm"]:::block
+    J["Self-attention branch<br/>Q/K/V projections<br/>RoPE positions<br/>optional QK norm<br/>SDPA / talking heads"]:::model
+    K["SwiGLU feed-forward branch<br/>gate_proj * up_proj<br/>down_proj"]:::model
+    L["Residual merge<br/>optional LayerScale<br/>mask output"]:::model
+    ET ~~~ EG
+    ET ~~~ I
+    I --> J --> L
+    I --> K --> L
+  end
+
+  subgraph train["&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Training objective"]
+    direction TB
+    Z0["Targets from batch mapper<br/>match score -> quality class<br/>presence -> omission target"]:::train
+    Z1["Quality loss<br/>class-weighted CrossEntropy<br/>masked by attention_mask"]:::train
+    Z2["Omission loss<br/>BCEWithLogitsLoss<br/>masked by attention_mask"]:::train
+    Z3["Total objective<br/>quality_loss + lambda * omission_loss<br/>AdamW, grad clip 1.0"]:::train
+    Z4["Checkpoint artifact<br/>model_state_dict, optimizer_state_dict<br/>metrics, class_weights, config"]:::out
+    Z0 --> Z1 --> Z3 --> Z4
+    Z0 --> Z2 --> Z3
+  end
+
+  subgraph runtime["Runtime result"]
+    direction TB
+    R1["ScorerPhonePrediction<br/>predicted_class argmax<br/>quality_class_probs<br/>expected_score<br/>expected_human_score<br/>omission_probability<br/>timings + alignment_confidence"]:::out
+    R2["ScorerModelInfo<br/>runtime_backend=scorer_v2<br/>model_version=v2 or v3<br/>checkpoint, backbone, device, labels"]:::out
+  end
+
+  E --> IN
+  I -. uses .-> G
+  I -. uses .-> R
+  L ~~~ Z0
+  T --> Z1
+  U --> Z2
+  V --> R1
+  W --> R1
+  X --> R1
+  Y --> R1
+  Z4 --> R2

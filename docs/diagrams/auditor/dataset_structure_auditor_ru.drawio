@@ -1,0 +1,117 @@
+<mxfile host="app.diagrams.net" version="24.0.0">
+  <diagram id="dataset_structure_auditor" name="Структура данных">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="980" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Как устроены обучающие данные: запись → слова → звуки → метки" style="text;html=1;align=center;fontSize=22;fontStyle=1;fontColor=#0b2545;" vertex="1" parent="1">
+          <mxGeometry x="100" y="20" width="1600" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- ===== LEFT: nested hierarchy ===== -->
+        <mxCell id="h_caption" value="Строение одной записи" style="text;html=1;align=center;fontSize=16;fontStyle=1;fontColor=#0b2545;" vertex="1" parent="1">
+          <mxGeometry x="60" y="80" width="820" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- Record (outer) -->
+        <mxCell id="rec" value="Запись речи (произнесённая фраза)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#eaf4ff;strokeColor=#2f80ed;fontColor=#0b2545;fontSize=16;fontStyle=1;arcSize=4;" vertex="1" parent="1">
+          <mxGeometry x="60" y="120" width="820" height="600" as="geometry" />
+        </mxCell>
+
+        <!-- Word -->
+        <mxCell id="word" value="Слово" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#f4e9ff;strokeColor=#7b61ff;fontColor=#24123d;fontSize=15;fontStyle=1;arcSize=4;" vertex="1" parent="1">
+          <mxGeometry x="100" y="175" width="740" height="500" as="geometry" />
+        </mxCell>
+
+        <!-- Sound 1 -->
+        <mxCell id="snd1" value="Звук (фонема)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#fff4e0;strokeColor=#f2a900;fontColor=#3d2c00;fontSize=14;fontStyle=1;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="140" y="230" width="660" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="snd1_lab" value="Оценка и метки звука: класс «неверно / с акцентом / верно», отметка пропуска" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f8ee;strokeColor=#27ae60;fontColor=#0f3b22;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="170" y="290" width="600" height="86" as="geometry" />
+        </mxCell>
+
+        <!-- Sound 2 -->
+        <mxCell id="snd2" value="Звук (фонема)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#fff4e0;strokeColor=#f2a900;fontColor=#3d2c00;fontSize=14;fontStyle=1;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="140" y="420" width="660" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="snd2_lab" value="Оценка и метки звука: класс «неверно / с акцентом / верно», отметка пропуска" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f8ee;strokeColor=#27ae60;fontColor=#0f3b22;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="170" y="480" width="600" height="86" as="geometry" />
+        </mxCell>
+
+        <mxCell id="more" value="… и другие слова и звуки записи" style="text;html=1;align=center;fontSize=13;fontStyle=2;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="140" y="615" width="660" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- ===== RIGHT: concrete example ===== -->
+        <mxCell id="ex_caption" value="Наглядный пример" style="text;html=1;align=center;fontSize=16;fontStyle=1;fontColor=#0b2545;" vertex="1" parent="1">
+          <mxGeometry x="940" y="80" width="760" height="26" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ex" value="Пример записи" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#f7fbff;strokeColor=#2f80ed;fontColor=#0b2545;fontSize=15;fontStyle=1;arcSize=4;" vertex="1" parent="1">
+          <mxGeometry x="940" y="120" width="760" height="600" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ex_phrase" value="Пример слова: «Monday»" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf4ff;strokeColor=#2f80ed;fontColor=#0b2545;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="170" width="680" height="56" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ex_word" value="Слово: «Monday»" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f4e9ff;strokeColor=#7b61ff;fontColor=#24123d;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="246" width="620" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ex_s1" value="Звук «m» — верно" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f8ee;strokeColor=#27ae60;fontColor=#0f3b22;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="316" width="560" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="ex_s2" value="Звук «o» — с акцентом" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff4e0;strokeColor=#f2a900;fontColor=#3d2c00;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="378" width="560" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="ex_s3" value="Звук «n» — верно" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f8ee;strokeColor=#27ae60;fontColor=#0f3b22;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="440" width="560" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="ex_s4" value="Звук «day» — пропущен" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fde8ee;strokeColor=#c0395f;fontColor=#7a1f3d;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="502" width="560" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="ex_note" value="Каждому звуку присвоены оценка качества и метки" style="text;html=1;align=center;fontSize=13;fontStyle=2;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="575" width="620" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- ===== BOTTOM: train/val split ===== -->
+        <mxCell id="split_h" value="Все записи делятся на две части" style="text;html=1;align=center;fontSize=16;fontStyle=1;fontColor=#0b2545;" vertex="1" parent="1">
+          <mxGeometry x="100" y="760" width="1600" height="28" as="geometry" />
+        </mxCell>
+
+        <mxCell id="train_pile" value="Обучающая выборка" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#e6f8ee;strokeColor=#27ae60;fontColor=#0f3b22;fontSize=15;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="810" width="500" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="train_r1" value="запись" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#27ae60;fontColor=#0f3b22;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="370" y="865" width="130" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="train_r2" value="запись" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#27ae60;fontColor=#0f3b22;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="525" y="865" width="130" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="train_r3" value="… много записей" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#27ae60;fontColor=#0f3b22;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="680" y="865" width="130" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="val_pile" value="Проверочная выборка" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#fff4e0;strokeColor=#f2a900;fontColor=#3d2c00;fontSize=15;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="960" y="810" width="500" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="val_r1" value="запись" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#f2a900;fontColor=#3d2c00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="990" y="865" width="130" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="val_r2" value="запись" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#f2a900;fontColor=#3d2c00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1145" y="865" width="130" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="val_r3" value="… меньше записей" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#f2a900;fontColor=#3d2c00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="865" width="130" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="se1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeWidth=2;strokeColor=#27ae60;" edge="1" parent="1" source="split_h" target="train_pile"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="se2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeWidth=2;strokeColor=#f2a900;" edge="1" parent="1" source="split_h" target="val_pile"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,84 @@
+Loaded pretrained acoustic encoder from /cold/checkpoints/acoustic_encoder_v2/pretrain_best.pt
+train: using dense parquet dataset from /cold/speech_quality/feature_store/v2/splits/train/parquet/words.parquet
+train: class weights=[1.686857, 0.817167, 0.452681]
+val: using dense parquet dataset from /cold/speech_quality/feature_store/v2/splits/val/parquet/words.parquet
+val: cached 36 batch(es) / 4608 words in CPU RAM (9863.6 words/s)
+--- Epoch 1/10 ---
+Train Step 00100 | Quality L: 0.9556 | Omit L: 0.4873 | Score MAE: 0.2662 | 5391.1 words/s
+Train Step 00200 | Quality L: 0.8753 | Omit L: 0.4419 | Score MAE: 0.2475 | 5611.7 words/s
+Train Step 00300 | Quality L: 0.9170 | Omit L: 0.4337 | Score MAE: 0.2321 | 5538.0 words/s
+Train Summary | Epoch 1 | Steps: 312 | Words: 39936 | Tokens: 159744 | Quality: 0.9156 | Omit: 0.4575 | Score MAE: 0.2491 | Class Acc: 0.6123 | Objective: 1.0300
+Val Summary   | Epoch 1 | Steps: 36 | Words: 4608 | Tokens: 18432 | Quality: 0.9520 | Omit: 0.4832 | Score MAE: 0.2613 | Class Acc: 0.5916 | Objective: 1.0728
+Saved checkpoint to /cold/checkpoints/scorer_v2/scorer_v2_epoch_1.pt
+New best validation checkpoint saved to /cold/checkpoints/scorer_v2/scorer_v2_best.pt (quality_loss=0.9520)
+--- Epoch 2/10 ---
+Train Step 00100 | Quality L: 0.8049 | Omit L: 0.3666 | Score MAE: 0.2075 | 5408.7 words/s
+Train Step 00200 | Quality L: 0.8084 | Omit L: 0.3591 | Score MAE: 0.2054 | 5291.6 words/s
+Train Step 00300 | Quality L: 0.7508 | Omit L: 0.3780 | Score MAE: 0.1918 | 5309.9 words/s
+Train Summary | Epoch 2 | Steps: 312 | Words: 39936 | Tokens: 159744 | Quality: 0.7760 | Omit: 0.3790 | Score MAE: 0.2060 | Class Acc: 0.6662 | Objective: 0.8708
+Val Summary   | Epoch 2 | Steps: 36 | Words: 4608 | Tokens: 18432 | Quality: 0.8107 | Omit: 0.4025 | Score MAE: 0.2187 | Class Acc: 0.6430 | Objective: 0.9113
+Saved checkpoint to /cold/checkpoints/scorer_v2/scorer_v2_epoch_2.pt
+New best validation checkpoint saved to /cold/checkpoints/scorer_v2/scorer_v2_best.pt (quality_loss=0.8107)
+--- Epoch 3/10 ---
+encoder: trainable
+Train Step 00100 | Quality L: 0.7046 | Omit L: 0.3194 | Score MAE: 0.1717 | 3218.4 words/s
+Train Step 00200 | Quality L: 0.6539 | Omit L: 0.3128 | Score MAE: 0.1739 | 3133.0 words/s
+Train Step 00300 | Quality L: 0.6599 | Omit L: 0.3151 | Score MAE: 0.1658 | 3196.3 words/s
+Train Summary | Epoch 3 | Steps: 312 | Words: 39936 | Tokens: 159744 | Quality: 0.6587 | Omit: 0.3219 | Score MAE: 0.1755 | Class Acc: 0.7096 | Objective: 0.7392
+Val Summary   | Epoch 3 | Steps: 36 | Words: 4608 | Tokens: 18432 | Quality: 0.7085 | Omit: 0.3429 | Score MAE: 0.1891 | Class Acc: 0.6846 | Objective: 0.7943
+Saved checkpoint to /cold/checkpoints/scorer_v2/scorer_v2_epoch_3.pt
+New best validation checkpoint saved to /cold/checkpoints/scorer_v2/scorer_v2_best.pt (quality_loss=0.7085)
+--- Epoch 4/10 ---
+Train Step 00100 | Quality L: 0.5795 | Omit L: 0.2834 | Score MAE: 0.1575 | 3256.7 words/s
+Train Step 00200 | Quality L: 0.5947 | Omit L: 0.2648 | Score MAE: 0.1514 | 3274.2 words/s
+Train Step 00300 | Quality L: 0.5562 | Omit L: 0.2634 | Score MAE: 0.1546 | 3165.9 words/s
+Train Summary | Epoch 4 | Steps: 312 | Words: 39936 | Tokens: 159744 | Quality: 0.5786 | Omit: 0.2756 | Score MAE: 0.1503 | Class Acc: 0.7479 | Objective: 0.6475
+Val Summary   | Epoch 4 | Steps: 36 | Words: 4608 | Tokens: 18432 | Quality: 0.6299 | Omit: 0.3039 | Score MAE: 0.1650 | Class Acc: 0.7163 | Objective: 0.7059
+Saved checkpoint to /cold/checkpoints/scorer_v2/scorer_v2_epoch_4.pt
+New best validation checkpoint saved to /cold/checkpoints/scorer_v2/scorer_v2_best.pt (quality_loss=0.6299)
+--- Epoch 5/10 ---
+Train Step 00100 | Quality L: 0.5161 | Omit L: 0.2469 | Score MAE: 0.1317 | 3175.7 words/s
+Train Step 00200 | Quality L: 0.5232 | Omit L: 0.2462 | Score MAE: 0.1306 | 3101.1 words/s
+Train Step 00300 | Quality L: 0.4826 | Omit L: 0.2223 | Score MAE: 0.1226 | 3150.1 words/s
+Train Summary | Epoch 5 | Steps: 312 | Words: 39936 | Tokens: 159744 | Quality: 0.5104 | Omit: 0.2391 | Score MAE: 0.1290 | Class Acc: 0.7750 | Objective: 0.5702
+Val Summary   | Epoch 5 | Steps: 36 | Words: 4608 | Tokens: 18432 | Quality: 0.5837 | Omit: 0.2721 | Score MAE: 0.1457 | Class Acc: 0.7455 | Objective: 0.6518
+Saved checkpoint to /cold/checkpoints/scorer_v2/scorer_v2_epoch_5.pt
+New best validation checkpoint saved to /cold/checkpoints/scorer_v2/scorer_v2_best.pt (quality_loss=0.5837)
+--- Epoch 6/10 ---
+Train Step 00100 | Quality L: 0.4982 | Omit L: 0.2038 | Score MAE: 0.1094 | 3086.7 words/s
+Train Step 00200 | Quality L: 0.4823 | Omit L: 0.2134 | Score MAE: 0.1154 | 3238.2 words/s
+Train Step 00300 | Quality L: 0.4396 | Omit L: 0.2069 | Score MAE: 0.1084 | 3052.0 words/s
+Train Summary | Epoch 6 | Steps: 312 | Words: 39936 | Tokens: 159744 | Quality: 0.4600 | Omit: 0.2036 | Score MAE: 0.1118 | Class Acc: 0.8010 | Objective: 0.5109
+Val Summary   | Epoch 6 | Steps: 36 | Words: 4608 | Tokens: 18432 | Quality: 0.5514 | Omit: 0.2406 | Score MAE: 0.1310 | Class Acc: 0.7626 | Objective: 0.6115
+Saved checkpoint to /cold/checkpoints/scorer_v2/scorer_v2_epoch_6.pt
+New best validation checkpoint saved to /cold/checkpoints/scorer_v2/scorer_v2_best.pt (quality_loss=0.5514)
+--- Epoch 7/10 ---
+Train Step 00100 | Quality L: 0.4273 | Omit L: 0.1863 | Score MAE: 0.1065 | 3043.7 words/s
+Train Step 00200 | Quality L: 0.4297 | Omit L: 0.1846 | Score MAE: 0.1022 | 3159.9 words/s
+Train Step 00300 | Quality L: 0.4065 | Omit L: 0.1715 | Score MAE: 0.1009 | 3090.5 words/s
+Train Summary | Epoch 7 | Steps: 312 | Words: 39936 | Tokens: 159744 | Quality: 0.4314 | Omit: 0.1800 | Score MAE: 0.1003 | Class Acc: 0.8204 | Objective: 0.4764
+Val Summary   | Epoch 7 | Steps: 36 | Words: 4608 | Tokens: 18432 | Quality: 0.5844 | Omit: 0.2292 | Score MAE: 0.1369 | Class Acc: 0.7476 | Objective: 0.6417
+Saved checkpoint to /cold/checkpoints/scorer_v2/scorer_v2_epoch_7.pt
+--- Epoch 8/10 ---
+Train Step 00100 | Quality L: 0.4227 | Omit L: 0.1617 | Score MAE: 0.0921 | 3034.1 words/s
+Train Step 00200 | Quality L: 0.3988 | Omit L: 0.1524 | Score MAE: 0.0935 | 3274.0 words/s
+Train Step 00300 | Quality L: 0.4138 | Omit L: 0.1596 | Score MAE: 0.0915 | 3045.7 words/s
+Train Summary | Epoch 8 | Steps: 312 | Words: 39936 | Tokens: 159744 | Quality: 0.4106 | Omit: 0.1599 | Score MAE: 0.0935 | Class Acc: 0.8341 | Objective: 0.4506
+Val Summary   | Epoch 8 | Steps: 36 | Words: 4608 | Tokens: 18432 | Quality: 0.5544 | Omit: 0.2171 | Score MAE: 0.1292 | Class Acc: 0.7490 | Objective: 0.6087
+Saved checkpoint to /cold/checkpoints/scorer_v2/scorer_v2_epoch_8.pt
+--- Epoch 9/10 ---
+Train Step 00100 | Quality L: 0.4045 | Omit L: 0.1561 | Score MAE: 0.0957 | 3146.6 words/s
+Train Step 00200 | Quality L: 0.3884 | Omit L: 0.1408 | Score MAE: 0.0957 | 3215.1 words/s
+Train Step 00300 | Quality L: 0.3721 | Omit L: 0.1446 | Score MAE: 0.0919 | 3135.4 words/s
+Train Summary | Epoch 9 | Steps: 312 | Words: 39936 | Tokens: 159744 | Quality: 0.4013 | Omit: 0.1486 | Score MAE: 0.0914 | Class Acc: 0.8378 | Objective: 0.4385
+Val Summary   | Epoch 9 | Steps: 36 | Words: 4608 | Tokens: 18432 | Quality: 0.5258 | Omit: 0.1992 | Score MAE: 0.1207 | Class Acc: 0.7650 | Objective: 0.5755
+Saved checkpoint to /cold/checkpoints/scorer_v2/scorer_v2_epoch_9.pt
+New best validation checkpoint saved to /cold/checkpoints/scorer_v2/scorer_v2_best.pt (quality_loss=0.5258)
+--- Epoch 10/10 ---
+Train Step 00100 | Quality L: 0.4078 | Omit L: 0.1384 | Score MAE: 0.0926 | 3071.7 words/s
+Train Step 00200 | Quality L: 0.4162 | Omit L: 0.1364 | Score MAE: 0.0894 | 3118.9 words/s
+Train Step 00300 | Quality L: 0.3924 | Omit L: 0.1296 | Score MAE: 0.0899 | 3241.9 words/s
+Train Summary | Epoch 10 | Steps: 312 | Words: 39936 | Tokens: 159744 | Quality: 0.4030 | Omit: 0.1394 | Score MAE: 0.0901 | Class Acc: 0.8426 | Objective: 0.4379
+Val Summary   | Epoch 10 | Steps: 36 | Words: 4608 | Tokens: 18432 | Quality: 0.5222 | Omit: 0.1922 | Score MAE: 0.1202 | Class Acc: 0.7633 | Objective: 0.5703
+Saved checkpoint to /cold/checkpoints/scorer_v2/scorer_v2_epoch_10.pt
+New best validation checkpoint saved to /cold/checkpoints/scorer_v2/scorer_v2_best.pt (quality_loss=0.5222)

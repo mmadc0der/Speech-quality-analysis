@@ -1,0 +1,54 @@
+<mxfile host="app.diagrams.net" version="24.0.0">
+  <diagram id="capture_auditor" name="Запись и подготовка звука">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="720" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Запись звука и его подготовка к анализу" style="text;html=1;align=center;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="20" width="1500" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="g1" value="На устройстве пользователя" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eaf4ff;strokeColor=#2f80ed;fontColor=#0b2545;verticalAlign=top;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="40" y="110" width="460" height="430" as="geometry" />
+        </mxCell>
+        <mxCell id="c1" value="Пользователь говорит&#10;в микрофон" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2f80ed;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="80" y="170" width="380" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="c2" value="Браузер записывает&#10;и сохраняет звук" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2f80ed;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="80" y="360" width="380" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="g2" value="На сервере: подготовка звука" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f2ebff;strokeColor=#7b61ff;fontColor=#24123d;verticalAlign=top;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="600" y="110" width="500" height="560" as="geometry" />
+        </mxCell>
+        <mxCell id="p1" value="Приведение к единому формату:&#10;один звуковой канал и единая частота" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7b61ff;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="640" y="160" width="420" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p2" value="Выравнивание громкости&#10;до единого уровня" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7b61ff;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="640" y="280" width="420" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p3" value="Удаление тишины&#10;и пауз по краям записи" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7b61ff;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="640" y="400" width="420" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p4" value="Проверка качества записи:&#10;громкость, помехи, перегрузка, доля тишины" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7b61ff;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="640" y="520" width="420" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="g3" value="Результат" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eafff2;strokeColor=#27ae60;fontColor=#0f3b22;verticalAlign=top;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="110" width="460" height="430" as="geometry" />
+        </mxCell>
+        <mxCell id="out" value="Чистый звук, готовый к анализу&#10;(с пометкой о качестве записи)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#27ae60;fontColor=#0f3b22;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="265" width="380" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ec1" value="голос пользователя" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="c1" target="c2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ec2" value="запись отправляется на сервер" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="c2" target="p1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep1" value="звук в едином формате" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="p1" target="p2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep2" value="громкость выровнена" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="p2" target="p3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep3" value="лишние паузы убраны" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="p3" target="p4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep4" value="запись пригодна к анализу" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="p4" target="out"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

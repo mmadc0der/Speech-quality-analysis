@@ -1,0 +1,57 @@
+<mxfile host="app.diagrams.net" version="24.0.0">
+  <diagram id="model_auditor" name="Модель для аудиторов">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="960" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Как нейросеть оценивает произношение" style="text;html=1;align=center;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="200" y="20" width="800" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ac_in" value="Признаки речи&#10;по каждому звуку&#10;(как человек произнёс)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fbff;strokeColor=#6b9df2;fontColor=#0b2545;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="120" y="90" width="300" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="ph_in" value="Ожидаемые звуки слова&#10;(как должно звучать)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fbff;strokeColor=#6b9df2;fontColor=#0b2545;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="780" y="90" width="300" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ac_enc" value="Анализ звучания речи" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f2ebff;strokeColor=#7b61ff;fontColor=#24123d;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="140" y="220" width="260" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="ph_emb" value="Представление&#10;ожидаемых звуков" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f2ebff;strokeColor=#7b61ff;fontColor=#24123d;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="800" y="220" width="260" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fusion" value="Объединение:&#10;сравнение реального звучания&#10;с ожидаемым произношением" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff4d6;strokeColor=#f2a900;fontColor=#3d2c00;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="420" y="350" width="360" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="scorer" value="Учёт контекста&#10;всего слова целиком" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff4d6;strokeColor=#f2a900;fontColor=#3d2c00;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="440" y="500" width="320" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="q_head" value="Оценка качества каждого звука:&#10;неверно / с акцентом / верно" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eafff2;strokeColor=#27ae60;fontColor=#0f3b22;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="120" y="640" width="360" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="o_head" value="Признак пропуска звука&#10;(звук не произнесён)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eafff2;strokeColor=#27ae60;fontColor=#0f3b22;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="720" y="640" width="360" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="scores" value="Внутренние оценки&#10;по каждому звуку слова" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f3f3;strokeColor=#777777;fontColor=#222222;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="380" y="800" width="440" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="m1" value="признаки речи" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="ac_in" target="ac_enc"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m3" value="ожидаемые звуки" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="ph_in" target="ph_emb"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m5" value="как прозвучало" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="ac_enc" target="fusion"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m6" value="как должно звучать" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="ph_emb" target="fusion"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m7" value="сравнение по каждому звуку" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="fusion" target="scorer"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m8" value="оценка качества" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="scorer" target="q_head"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m9" value="проверка пропуска" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="scorer" target="o_head"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m10" value="вероятности качества" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="q_head" target="scores"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m11" value="вероятность пропуска" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="o_head" target="scores"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

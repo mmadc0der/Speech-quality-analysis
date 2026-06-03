@@ -1,0 +1,71 @@
+<mxfile host="app.diagrams.net" version="24.0.0">
+  <diagram id="model" name="Модель scorer_v2">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="1050" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Модель PhonemeScorerModelV2 (scorer_v2)" style="text;html=1;align=center;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="300" y="20" width="600" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ac_in" value="acoustic_embeddings&#10;[B, S, 768]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fbff;strokeColor=#6b9df2;fontColor=#0b2545;" vertex="1" parent="1">
+          <mxGeometry x="120" y="90" width="240" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ph_in" value="phoneme_ids&#10;[B, S]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fbff;strokeColor=#6b9df2;fontColor=#0b2545;" vertex="1" parent="1">
+          <mxGeometry x="840" y="90" width="240" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ac_enc" value="Акустический поток&#10;RMSNorm 768 → Linear 768→d → Dropout&#10;AcousticEncoderV2&#10;(AcousticEncoderBlock × 6)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f2ebff;strokeColor=#7b61ff;fontColor=#24123d;" vertex="1" parent="1">
+          <mxGeometry x="110" y="200" width="260" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="ac_state" value="acoustic_state [B, S, d]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fbff;strokeColor=#6b9df2;fontColor=#0b2545;" vertex="1" parent="1">
+          <mxGeometry x="130" y="340" width="220" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ph_emb" value="Поток целевой фонемы&#10;Embedding 42→48 (padding_idx=0)&#10;RMSNorm 48 → Linear 48→d → Dropout" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f2ebff;strokeColor=#7b61ff;fontColor=#24123d;" vertex="1" parent="1">
+          <mxGeometry x="830" y="200" width="260" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="ph_state" value="phoneme_state [B, S, d]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fbff;strokeColor=#6b9df2;fontColor=#0b2545;" vertex="1" parent="1">
+          <mxGeometry x="850" y="340" width="220" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fusion" value="Слияние признаков (concat → 4d)&#10;[acoustic, phoneme, разность, произведение]&#10;RMSNorm 4d → Linear 4d→d → Dropout" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f2ebff;strokeColor=#7b61ff;fontColor=#24123d;" vertex="1" parent="1">
+          <mxGeometry x="420" y="440" width="360" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="scorer" value="Контекстный скорер&#10;AcousticEncoderBlock × 2&#10;→ Output RMSNorm (masked)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff4d6;strokeColor=#f2a900;fontColor=#3d2c00;" vertex="1" parent="1">
+          <mxGeometry x="450" y="580" width="300" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="q_head" value="Голова качества&#10;Linear d → 3 logits&#10;softmax: wrong_or_missed | accented | correct" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eafff2;strokeColor=#27ae60;fontColor=#0f3b22;" vertex="1" parent="1">
+          <mxGeometry x="180" y="720" width="320" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="o_head" value="Голова пропуска&#10;Linear d → 1 logit&#10;sigmoid → omission_probability" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eafff2;strokeColor=#27ae60;fontColor=#0f3b22;" vertex="1" parent="1">
+          <mxGeometry x="700" y="720" width="320" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="scores" value="class_probs · [15, 60, 92] = expected_score&#10;class_probs · [0, 1, 2] = expected_human_score&#10;argmax = predicted_class" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f3f3;strokeColor=#777777;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="170" y="850" width="340" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="block" value="AcousticEncoderBlock (переиспользуемый)&#10;Self-attention (Q/K/V, RoPE, SDPA) +&#10;SwiGLU FFN → Residual + mask" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e8;strokeColor=#f2a900;fontColor=#3d2c00;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="430" y="200" width="340" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="m1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="ac_in" target="ac_enc"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="ac_enc" target="ac_state"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m3" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="ph_in" target="ph_emb"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m4" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="ph_emb" target="ph_state"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m5" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="ac_state" target="fusion"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m6" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="ph_state" target="fusion"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m7" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="fusion" target="scorer"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m8" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="scorer" target="q_head"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m9" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="scorer" target="o_head"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="m10" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="q_head" target="scores"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="u1" value="uses" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=open;dashed=1;fontColor=#777;" edge="1" parent="1" source="block" target="ac_enc"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="u2" value="uses" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=open;dashed=1;fontColor=#777;" edge="1" parent="1" source="block" target="scorer"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

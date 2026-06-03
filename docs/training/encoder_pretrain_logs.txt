@@ -1,0 +1,56 @@
+train: using mmap dataset from /cold/speech_quality/feature_store/libritts/splits/train/mmap
+train: pretrain config | objective=masked_token_ce | vocab=504 | batch_size=256 | mask_ratio=0.2 | epochs=10 | steps/epoch=22313 | log_every=100
+Train Step 005000 | CE loss: 5.5346 | ppl: 253.30 | Masked tokens: 200 | 5965.7 words/s
+Train Step 010000 | CE loss: 5.0906 | ppl: 162.48 | Masked tokens: 198 | 6054.6 words/s
+Train Step 015000 | CE loss: 4.8467 | ppl: 127.32 | Masked tokens: 215 | 6380.9 words/s
+Train Step 020000 | CE loss: 4.2480 | ppl: 69.97 | Masked tokens: 210 | 6025.8 words/s
+Saved checkpoint to /cold/checkpoints/acoustic_encoder_v2/acoustic_encoder_v2_epoch_1.pt  (epoch 1/10, step 022313)
+Train Step 025000 | CE loss: 3.8960 | ppl: 49.20 | Masked tokens: 206 | 6345.7 words/s
+Train Step 030000 | CE loss: 3.5422 | ppl: 34.54 | Masked tokens: 202 | 6502.8 words/s
+Train Step 035000 | CE loss: 3.2390 | ppl: 25.51 | Masked tokens: 210 | 6184.0 words/s
+Train Step 040000 | CE loss: 3.1198 | ppl: 22.64 | Masked tokens: 206 | 6429.1 words/s
+Saved checkpoint to /cold/checkpoints/acoustic_encoder_v2/acoustic_encoder_v2_epoch_2.pt  (epoch 2/10, step 044626)
+Train Step 045000 | CE loss: 2.8703 | ppl: 17.64 | Masked tokens: 214 | 5925.7 words/s
+Train Step 050000 | CE loss: 2.5954 | ppl: 13.40 | Masked tokens: 192 | 5900.2 words/s
+Train Step 055000 | CE loss: 2.5202 | ppl: 12.43 | Masked tokens: 210 | 6387.7 words/s
+Train Step 060000 | CE loss: 2.2676 | ppl: 9.66 | Masked tokens: 206 | 6122.8 words/s
+Train Step 065000 | CE loss: 2.0828 | ppl: 8.03 | Masked tokens: 189 | 6505.9 words/s
+Saved checkpoint to /cold/checkpoints/acoustic_encoder_v2/acoustic_encoder_v2_epoch_3.pt  (epoch 3/10, step 066939)
+Train Step 070000 | CE loss: 1.9757 | ppl: 7.21 | Masked tokens: 207 | 6277.3 words/s
+Train Step 075000 | CE loss: 2.0223 | ppl: 7.56 | Masked tokens: 212 | 6460.9 words/s
+Train Step 080000 | CE loss: 1.7581 | ppl: 5.80 | Masked tokens: 194 | 6354.1 words/s
+Train Step 085000 | CE loss: 1.6667 | ppl: 5.29 | Masked tokens: 205 | 6407.5 words/s
+Saved checkpoint to /cold/checkpoints/acoustic_encoder_v2/acoustic_encoder_v2_epoch_4.pt  (epoch 4/10, step 089252)
+Train Step 090000 | CE loss: 1.5784 | ppl: 4.85 | Masked tokens: 201 | 6426.9 words/s
+Train Step 095000 | CE loss: 1.5894 | ppl: 4.90 | Masked tokens: 193 | 6471.9 words/s
+Train Step 100000 | CE loss: 1.4107 | ppl: 4.10 | Masked tokens: 195 | 6505.5 words/s
+Train Step 105000 | CE loss: 1.3710 | ppl: 3.94 | Masked tokens: 189 | 6318.5 words/s
+Train Step 110000 | CE loss: 1.2658 | ppl: 3.55 | Masked tokens: 195 | 6427.2 words/s
+Saved checkpoint to /cold/checkpoints/acoustic_encoder_v2/acoustic_encoder_v2_epoch_5.pt  (epoch 5/10, step 111565)
+Train Step 115000 | CE loss: 1.3614 | ppl: 3.90 | Masked tokens: 219 | 5992.1 words/s
+Train Step 120000 | CE loss: 1.2560 | ppl: 3.51 | Masked tokens: 217 | 6097.5 words/s
+Train Step 125000 | CE loss: 1.2524 | ppl: 3.50 | Masked tokens: 213 | 5936.6 words/s
+Train Step 130000 | CE loss: 1.1980 | ppl: 3.31 | Masked tokens: 214 | 6426.1 words/s
+Saved checkpoint to /cold/checkpoints/acoustic_encoder_v2/acoustic_encoder_v2_epoch_6.pt  (epoch 6/10, step 133878)
+Train Step 135000 | CE loss: 1.1576 | ppl: 3.18 | Masked tokens: 192 | 6360.7 words/s
+Train Step 140000 | CE loss: 1.1478 | ppl: 3.15 | Masked tokens: 190 | 6473.8 words/s
+Train Step 145000 | CE loss: 1.1430 | ppl: 3.14 | Masked tokens: 205 | 6110.7 words/s
+Train Step 150000 | CE loss: 1.0361 | ppl: 2.82 | Masked tokens: 201 | 6037.0 words/s
+Train Step 155000 | CE loss: 1.1746 | ppl: 3.24 | Masked tokens: 194 | 6477.8 words/s
+Saved checkpoint to /cold/checkpoints/acoustic_encoder_v2/acoustic_encoder_v2_epoch_7.pt  (epoch 7/10, step 156191)
+Train Step 160000 | CE loss: 1.1148 | ppl: 3.05 | Masked tokens: 200 | 6108.6 words/s
+Train Step 165000 | CE loss: 0.9463 | ppl: 2.58 | Masked tokens: 197 | 6478.9 words/s
+Train Step 170000 | CE loss: 1.0852 | ppl: 2.96 | Masked tokens: 197 | 6238.2 words/s
+Train Step 175000 | CE loss: 1.0241 | ppl: 2.78 | Masked tokens: 208 | 6413.8 words/s
+Saved checkpoint to /cold/checkpoints/acoustic_encoder_v2/acoustic_encoder_v2_epoch_8.pt  (epoch 8/10, step 178504)
+Train Step 180000 | CE loss: 0.9363 | ppl: 2.55 | Masked tokens: 209 | 6190.8 words/s
+Train Step 185000 | CE loss: 0.9444 | ppl: 2.57 | Masked tokens: 217 | 6075.8 words/s
+Train Step 190000 | CE loss: 0.9791 | ppl: 2.66 | Masked tokens: 202 | 6337.2 words/s
+Train Step 195000 | CE loss: 0.9627 | ppl: 2.62 | Masked tokens: 217 | 5983.2 words/s
+Train Step 200000 | CE loss: 1.0352 | ppl: 2.82 | Masked tokens: 214 | 6162.3 words/s
+Saved checkpoint to /cold/checkpoints/acoustic_encoder_v2/acoustic_encoder_v2_epoch_9.pt  (epoch 9/10, step 200817)
+Train Step 205000 | CE loss: 1.0087 | ppl: 2.74 | Masked tokens: 202 | 6106.7 words/s
+Train Step 210000 | CE loss: 0.9410 | ppl: 2.56 | Masked tokens: 208 | 5957.0 words/s
+Train Step 215000 | CE loss: 0.8884 | ppl: 2.43 | Masked tokens: 218 | 6081.8 words/s
+Train Step 220000 | CE loss: 0.8959 | ppl: 2.45 | Masked tokens: 197 | 6113.0 words/s
+Saved checkpoint to /cold/checkpoints/acoustic_encoder_v2/acoustic_encoder_v2_epoch_10.pt  (epoch 10/10, step 223130)
